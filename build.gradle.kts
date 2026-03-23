@@ -14,7 +14,7 @@ plugins {
 
 group = "group.phorus"
 description = "Core authentication library for Phorus services."
-version = "1.0.0"
+version = "1.0.1"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -60,6 +60,18 @@ tasks {
     // Jacoco config
     jacocoTestReport {
         executionData.setFrom(fileTree(project.layout.buildDirectory).include("/jacoco/*.exec"))
+
+        classDirectories.setFrom(
+            sourceSets.main.get().output.classesDirs.map { dir ->
+                fileTree(dir).exclude(
+                    "**/model/**",
+                    "**/dtos/**",
+                    "**/config/**",
+                    "**/repositories/**",
+                    "**/*Application*",
+                )
+            }
+        )
 
 
         reports {
@@ -136,21 +148,6 @@ afterEvaluate {
     }
 }
 
-afterEvaluate {
-    tasks.named<JacocoReport>("jacocoTestReport") {
-        classDirectories.setFrom(files(classDirectories.files.map {
-            fileTree(it) {
-                exclude(
-                    "**/model/**",
-                    "**/dtos/**",
-                    "**/config/**",
-                    "**/repositories/**",
-                    "**/*Application*",
-                )
-            }
-        }))
-    }
-}
 
 mavenPublishing {
     coordinates(
