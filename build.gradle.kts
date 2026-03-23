@@ -61,6 +61,7 @@ tasks {
     jacocoTestReport {
         executionData.setFrom(fileTree(project.layout.buildDirectory).include("/jacoco/*.exec"))
 
+
         reports {
             xml.required.set(true)
             csv.required.set(true)
@@ -132,6 +133,22 @@ tasks {
 afterEvaluate {
     tasks.named("generateMetadataFileForMavenPublication") {
         dependsOn("dokkaJavadocJar")
+    }
+}
+
+afterEvaluate {
+    tasks.named<JacocoReport>("jacocoTestReport") {
+        classDirectories.setFrom(files(classDirectories.files.map {
+            fileTree(it) {
+                exclude(
+                    "**/model/**",
+                    "**/dtos/**",
+                    "**/config/**",
+                    "**/repositories/**",
+                    "**/*Application*",
+                )
+            }
+        }))
     }
 }
 
