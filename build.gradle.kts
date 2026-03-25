@@ -30,18 +30,25 @@ dependencies {
     // Kotlin
     implementation(kotlin("stdlib-jdk8"))
 
+    // Logging
+    implementation("org.slf4j:slf4j-api:2.0.16")
+
     // Exception hierarchy
     api("group.phorus:exception-core:1.0.0")
 
     // JWT API
     api("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
-    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-gson:0.13.0")
     runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.80")
 
     // Test
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    testImplementation("com.google.code.gson:gson:2.13.2")
+    testImplementation("org.wiremock:wiremock-jetty12:3.13.1")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:6.2.3")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.16")
 }
 
 configurations.configureEach {

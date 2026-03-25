@@ -143,6 +143,21 @@ data class IdpConfig(
     val jwkSetUri: String? = null,
     val jwksCacheTtlMinutes: Long = 60,
     val claims: ClaimsMapping = ClaimsMapping(),
+    val encryption: IdpEncryptionConfig = IdpEncryptionConfig(),
+)
+
+/**
+ * Encryption configuration for decrypting JWE tokens from an IdP.
+ *
+ * Some IdPs support Message-Level Encryption (MLE), where tokens are encrypted with your
+ * public key. You decrypt them with the corresponding private key configured here.
+ *
+ * @property algorithm Key algorithm (e.g. `"RSA"`, `"EC"`). Must match the key type.
+ * @property encodedPrivateKey Base64-encoded PKCS#8 private key for decryption.
+ */
+data class IdpEncryptionConfig(
+    val algorithm: String = "RSA",
+    val encodedPrivateKey: String? = null,
 )
 
 /**
