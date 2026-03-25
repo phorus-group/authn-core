@@ -36,9 +36,9 @@ dependencies {
 
     // JWT API
     api("io.jsonwebtoken:jjwt-api:0.13.0")
-    api("io.jsonwebtoken:jjwt-impl:0.13.0")
-    api("io.jsonwebtoken:jjwt-jackson:0.13.0")
-    api("org.bouncycastle:bcprov-jdk18on:1.80")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.13.0")
+    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.80")
 
     // Test
     testImplementation(kotlin("test"))
