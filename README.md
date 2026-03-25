@@ -28,6 +28,8 @@ context objects, DTOs, and service interfaces.
 - [Core implementations](#core-implementations)
   - [TokenCreator](#tokencreator)
   - [StandaloneTokenValidator](#standalonetokenvalidator)
+  - [IdpTokenValidator](#idptokenvalidator)
+  - [JwksKeyLocator](#jwkskeylocator)
 - [Context objects](#context-objects)
   - [AuthContext](#authcontext)
   - [HTTPContext](#httpcontext)
@@ -204,6 +206,13 @@ The `AuthNConfig` data class provides all settings needed for token creation and
 | `jwt.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for decryption |
 | `jwt.expiration.tokenMinutes` | `Long` | `10` | Access token lifetime in minutes |
 | `jwt.expiration.refreshTokenMinutes` | `Long` | `1440` | Refresh token lifetime in minutes |
+| `idp.issuerUri` | `String?` | `null` | IdP issuer identifier, validates `iss` claim |
+| `idp.jwkSetUri` | `String?` | `null` | URL of the IdP's JWKS endpoint |
+| `idp.jwksCacheTtlMinutes` | `Long` | `60` | How long fetched JWKS keys are cached |
+| `idp.claims.subject` | `String` | `"sub"` | Claim name for the user identifier |
+| `idp.claims.privileges` | `String` | `"scope"` | Claim name for scopes/roles/permissions |
+| `idp.encryption.algorithm` | `String` | `"RSA"` | Key algorithm for IdP JWE decryption |
+| `idp.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for IdP JWE decryption |
 
 ## Core implementations
 
@@ -222,6 +231,42 @@ time based on the number of Base64url segments:
 - 5 segments: JWE or nested JWE (decryption, with optional inner signature verification)
 
 It accepts an optional list of `Validator` instances for custom claim validation.
+
+### IdpTokenValidator
+
+`IdpTokenValidator` implements the `Authenticator` interface. It validates tokens issued by an
+external Identity Provider (IdP). It requires a `Locator<Key>` (e.g. `JwksKeyLocator`) for
+signature verification.
+
+Token format is auto-detected: JWS, JWE, or nested JWE. Claim extraction is configurable via
+`IdpConfig.claims` to support different IdP claim conventions (Auth0, Azure AD, Keycloak, Okta, etc.).
+Supports space-separated strings, JSON arrays, and nested dot-notation paths for privilege extraction.
+
+```kotlin
+val config = AuthNConfig(
+    mode = AuthMode.IDP_DELEGATED,
+    idp = IdpConfig(
+        issuerUri = "https://idp.example.com",
+        jwkSetUri = "https://idp.example.com/.well-known/jwks.json",
+        claims = ClaimsMapping(subject = "sub", privileges = "permissions"),
+    ),
+)
+val keyLocator = JwksKeyLocator(config.idp)
+val validator = IdpTokenValidator(config, keyLocator)
+val authData = validator.authenticate(idpToken)
+```
+
+### JwksKeyLocator
+
+`JwksKeyLocator` is a JJWT `LocatorAdapter<Key>` that fetches public keys from an IdP's JWKS
+endpoint using `java.net.http.HttpClient` (no framework dependencies). It caches keys in memory
+with a configurable TTL and includes a cooldown to prevent excessive fetches.
+
+**Note:** The `locate()` and `forceRefresh()` methods perform blocking HTTP calls. When calling
+from a coroutine context, wrap in `withContext(Dispatchers.IO)`.
+
+For Spring Boot projects, use [authn-spring-boot-starter](https://github.com/phorus-group/authn-spring-boot-starter)
+which auto-configures these as Spring beans and handles the coroutine wrapping.
 
 ## Context objects
 
@@ -279,8 +324,8 @@ val metadata: Map<String, String> = apiKey?.metadata ?: emptyMap()
 | `TokenFactory` | Creates signed/encrypted access and refresh tokens. |
 | `Validator` | Pluggable claim validator invoked after token parsing. |
 
-Core implementations: `TokenCreator` (implements `TokenFactory`) and `StandaloneTokenValidator`
-(implements `Authenticator`).
+Core implementations: `TokenCreator` (implements `TokenFactory`), `StandaloneTokenValidator`
+(implements `Authenticator`), and `IdpTokenValidator` (implements `Authenticator`).
 
 ## Keys and algorithms
 
