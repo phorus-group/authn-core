@@ -40,7 +40,7 @@ dependencies {
     api("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-gson:0.13.0")
-    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.80")
+    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.84")
 
     // Test
     testImplementation(kotlin("test"))
@@ -55,6 +55,9 @@ configurations.configureEach {
     resolutionStrategy.eachDependency {
         if (requested.group.startsWith("com.fasterxml.jackson")) {
             useVersion("2.18.6")
+        }
+        if (requested.group == "org.bouncycastle") {
+            useVersion("1.84")
         }
     }
 }
