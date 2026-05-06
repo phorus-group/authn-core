@@ -14,7 +14,7 @@ plugins {
 
 group = "group.phorus"
 description = "Core authentication library for Phorus services."
-version = "1.0.2"
+version = "1.0.3"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -34,7 +34,7 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.16")
 
     // Exception hierarchy
-    api("group.phorus:exception-core:1.0.0")
+    api("group.phorus:exception-core:1.1.1")
 
     // JWT API
     api("io.jsonwebtoken:jjwt-api:0.13.0")
