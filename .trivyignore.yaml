@@ -1,0 +1,7 @@
+vulnerabilities:
+  - id: CVE-2026-54515
+    reason: >
+      No fix available in the 2.18.x branch yet (requires 2.18.9, not yet released).
+      jackson-annotations 2.20+ dropped patch versioning, making cross-branch upgrades
+      incompatible with the current resolution strategy. Remove when 2.18.9 is released.
+    expires: "2026-09-30T00:00:00Z"
