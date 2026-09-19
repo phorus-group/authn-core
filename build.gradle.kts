@@ -40,7 +40,7 @@ dependencies {
     api("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-gson:0.13.0")
-    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.84")
+    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.85")
 
     // Test
     testImplementation(kotlin("test"))
@@ -57,7 +57,7 @@ configurations.configureEach {
             useVersion("2.18.9")
         }
         if (requested.group == "org.bouncycastle") {
-            useVersion("1.84")
+            useVersion("1.85")
         }
         if (requested.group == "org.jsoup") {
             useVersion("1.23.1")
