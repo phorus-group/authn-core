@@ -62,6 +62,9 @@ configurations.configureEach {
         if (requested.group == "org.jsoup") {
             useVersion("1.23.1")
         }
+        if (requested.group == "org.freemarker" && requested.module.name == "freemarker") {
+            useVersion("2.3.35")
+        }
     }
 }
 
