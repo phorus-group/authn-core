@@ -54,7 +54,7 @@ dependencies {
 configurations.configureEach {
     resolutionStrategy.eachDependency {
         if (requested.group.startsWith("com.fasterxml.jackson")) {
-            useVersion("2.18.10")
+            useVersion("2.18.11")
         }
         if (requested.group == "org.bouncycastle") {
             useVersion("1.85")
