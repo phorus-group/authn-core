@@ -74,6 +74,7 @@ local.properties
 # Gradle
 ######################
 .gradle/
+.kotlin/
 /build/
 
 ######################
