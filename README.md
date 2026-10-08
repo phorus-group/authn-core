@@ -493,7 +493,7 @@ val metadata: Map<String, String> = apiKey?.metadata ?: emptyMap()
 |------|-------------|
 | `AuthContextData` | User ID, roles, scope, and every claim of a validated token |
 | `AuthData` | Raw token data after parsing: user ID, token type, JTI, roles, scope, claims |
-| `TokenType` | `ACCESS_TOKEN` or `REFRESH_TOKEN` |
+| `TokenType` | `ACCESS_TOKEN` or `REFRESH_TOKEN`, each with the `typ` header media type it is written as |
 | `AccessToken` | Issued token: compact JWT string, roles, and scope |
 | `HTTPContextData` | Request path, method (as String), headers, query params, timestamps |
 | `ApiKeyContextData` | API key identifier and metadata after successful validation |

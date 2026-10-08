@@ -37,7 +37,8 @@ import java.util.*
  * 2. For JWE, peek at the unencrypted JOSE header to check for `cty: "JWT"`.
  * 3. Parse / decrypt / verify as appropriate.
  * 4. Extract `sub`, `jti`, the `scope` and `roles` claims named by
- *    [config.jwt.claims][group.phorus.authn.core.config.JwtConfig.claims], and the custom `type` header.
+ *    [config.jwt.claims][group.phorus.authn.core.config.JwtConfig.claims], and the token type from
+ *    the `typ` header.
  * 5. Run registered [Validator] instances (optional).
  * 6. Return [AuthData].
  *
@@ -72,7 +73,7 @@ class StandaloneTokenValidator(
 
         val (header, claims) = parseToken(jwt)
 
-        val tokenType = header[ExtraClaims.TYPE]?.let { TokenType.valueOf(it.toString()) }
+        val tokenType = header[ExtraClaims.TYPE]?.let { TokenType.fromMediaType(it.toString()) }
             ?: throw Unauthorized("Authentication failed, please log in again")
 
         val jti = claims.id
@@ -157,8 +158,9 @@ class StandaloneTokenValidator(
      * Parses a nested JWE: decrypts the outer JWE to obtain the inner JWS compact string,
      * then verifies the inner JWS signature and extracts claims.
      *
-     * The outer JWE header's `type` claim (if present) takes precedence over the inner JWS header
-     * so that the token type is always available regardless of format.
+     * The two headers merge with the inner JWS header winning for a shared key such as `typ`,
+     * because the signature covers the inner header and whoever holds the encryption public key can
+     * write the outer one.
      */
     private fun parseNestedJwe(jwt: String): Pair<Map<String, Any?>, Claims> {
         // Decrypt the JWE, the payload is a JWS compact string, not JSON claims
@@ -168,10 +170,9 @@ class StandaloneTokenValidator(
         val innerJwsString = contentBytes.toString(Charsets.UTF_8)
         val innerJws = verifyJws(innerJwsString)
 
-        // Merge headers, outer JWE header wins for shared keys (e.g. `type`)
         val mergedHeader = buildMap {
-            putAll(innerJws.header.toMap())
             putAll(jweHeader.toMap())
+            putAll(innerJws.header.toMap())
         }
 
         return Pair(mergedHeader, innerJws.payload)

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
+import java.security.spec.X509EncodedKeySpec
 import java.util.*
 
 /**
@@ -70,25 +71,54 @@ class StandaloneTokenValidatorTest {
             ),
         )
 
+        /** The value the library writes into the [ExtraClaims.TYPE] header for a given type. */
+        private fun typeHeaderValue(type: TokenType): String = type.mediaType
+
+        private fun signingPrivateKey() = KeyFactory.getInstance("EC")
+            .generatePrivate(PKCS8EncodedKeySpec(Base64.getDecoder().decode(SIG_PRIVATE_KEY)))
+
+        private fun encryptionPublicKey() = KeyFactory.getInstance("EC")
+            .generatePublic(X509EncodedKeySpec(Base64.getDecoder().decode(ENC_PUBLIC_KEY)))
+
         /**
          * Signs an arbitrary claim set with [SIG_PRIVATE_KEY], so a test can hand the validator any
          * claim shape an issuer might send.
          */
-        private fun signedTokenWith(claims: Map<String, Any>): String {
-            val keyBytes = Base64.getDecoder().decode(SIG_PRIVATE_KEY)
-            val privateKey = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(keyBytes))
+        private fun signedTokenWith(claims: Map<String, Any>): String =
+            signedTokenWith(claims, typeHeaderValue(TokenType.ACCESS_TOKEN))
 
-            return Jwts.builder()
+        private fun signedTokenWith(claims: Map<String, Any>, typeHeader: String): String =
+            Jwts.builder()
                 .header()
-                    .add(ExtraClaims.TYPE, TokenType.ACCESS_TOKEN.name)
+                    .add(ExtraClaims.TYPE, typeHeader)
                 .and()
                 .claims()
                     .add(mapOf("sub" to TEST_USER_ID.toString(), "jti" to UUID.randomUUID().toString()))
                     .add(claims)
                 .and()
-                .signWith(privateKey)
+                .signWith(signingPrivateKey())
+                .compact()
+
+        /**
+         * Builds a nested JWE whose outer and inner headers claim different token types, which is the
+         * only token that shows which of the two the validator trusts.
+         */
+        private fun nestedJweWithHeaders(inner: TokenType, outer: TokenType): String {
+            val innerJws = signedTokenWith(emptyMap(), typeHeaderValue(inner))
+
+            return Jwts.builder()
+                .header()
+                    .contentType("JWT")
+                    .add(ExtraClaims.TYPE, typeHeaderValue(outer))
+                .and()
+                .content(innerJws.toByteArray(Charsets.UTF_8))
+                .encryptWith(encryptionPublicKey(), Jwts.KEY.ECDH_ES_A256KW, Jwts.ENC.A192CBC_HS384)
                 .compact()
         }
+
+        /** The decoded JOSE header of the first segment of [token]. */
+        private fun headerJson(token: String): String =
+            Base64.getUrlDecoder().decode(token.substringBefore('.')).toString(Charsets.UTF_8)
     }
 
     @Nested
@@ -336,6 +366,63 @@ class StandaloneTokenValidatorTest {
 
             val authData = authenticator.authenticate(nestedToken)
             assertEquals(TEST_USER_ID, authData.userId)
+        }
+    }
+
+    @Nested
+    @DisplayName("The typ header")
+    inner class TypeHeaderTests {
+        private val config = buildConfig(TokenFormat.JWS)
+        private val factory = TokenCreator(config)
+        private val authenticator = StandaloneTokenValidator(config, emptyList())
+
+        @Test
+        fun `an access token header carries the RFC 9068 media type`(): Unit = runBlocking {
+            val token = factory.createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            assertTrue(
+                headerJson(token).contains(""""typ":"at+jwt""""),
+                "header was: ${headerJson(token)}",
+            )
+        }
+
+        @Test
+        fun `a refresh token header carries the refresh media type`(): Unit = runBlocking {
+            val token = factory.createRefreshToken(TEST_USER_ID, expires = true)
+
+            assertTrue(
+                headerJson(token).contains(""""typ":"rt+jwt""""),
+                "header was: ${headerJson(token)}",
+            )
+        }
+
+        @Test
+        fun `a media type the library does not know throws Unauthorized`() {
+            val token = signedTokenWith(emptyMap(), "application/octet-stream")
+
+            assertThrows<Unauthorized> { authenticator.authenticate(token, enableValidators = false) }
+        }
+
+        @Test
+        fun `the media type is matched without regard to case`() {
+            val token = signedTokenWith(emptyMap(), typeHeaderValue(TokenType.ACCESS_TOKEN).uppercase())
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(TokenType.ACCESS_TOKEN, authData.tokenType)
+        }
+
+        @Test
+        fun `the inner signed header decides the token type`() {
+            val nestedConfig = buildConfig(TokenFormat.NESTED_JWE)
+            val nestedAuthenticator = StandaloneTokenValidator(nestedConfig, emptyList())
+
+            val token = nestedJweWithHeaders(
+                inner = TokenType.REFRESH_TOKEN,
+                outer = TokenType.ACCESS_TOKEN,
+            )
+
+            val authData = nestedAuthenticator.authenticate(token, enableValidators = false)
+            assertEquals(TokenType.REFRESH_TOKEN, authData.tokenType)
         }
     }
 

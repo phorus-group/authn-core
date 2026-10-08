@@ -121,7 +121,7 @@ class TokenCreator(
 
         val builder = Jwts.builder()
             .header()
-                .add(ExtraClaims.TYPE, tokenType.name)
+                .add(ExtraClaims.TYPE, tokenType.mediaType)
             .and()
             .claims()
                 .add(claimsMap)
@@ -145,7 +145,7 @@ class TokenCreator(
 
         return Jwts.builder()
             .header()
-                .add(ExtraClaims.TYPE, tokenType.name)
+                .add(ExtraClaims.TYPE, tokenType.mediaType)
             .and()
             .claims()
                 .add(claimsMap)
@@ -176,7 +176,7 @@ class TokenCreator(
         return Jwts.builder()
             .header()
                 .contentType("JWT")
-                .add(ExtraClaims.TYPE, tokenType.name)
+                .add(ExtraClaims.TYPE, tokenType.mediaType)
             .and()
             .content(innerJws.toByteArray())
             .encryptWith(
@@ -189,9 +189,8 @@ class TokenCreator(
 
     /**
      * Writes [callerClaims] first and the registered claims after them, so the claims this library
-     * owns are the ones that reach the token. A caller key among them is refused outright rather
-     * than overwritten, because a mint site asking for `sub` or `exp` is asking for something it
-     * cannot have and a silent drop would hide that.
+     * owns are the ones that reach the token. A caller key among [RESERVED_CLAIM_NAMES] is refused
+     * with the key named.
      */
     private fun buildClaimsMap(
         userId: UUID,
@@ -276,8 +275,8 @@ class TokenCreator(
     companion object {
         /**
          * The claim names registered by
-         * [RFC 7519 SS4.1](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1) that this
-         * library writes itself.
+         * [RFC 7519 SS4.1](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1) that are
+         * reserved to this library and refused to a caller.
          */
         private val RESERVED_CLAIM_NAMES = setOf("jti", "sub", "iss", "iat", "exp", "nbf", "aud")
     }
