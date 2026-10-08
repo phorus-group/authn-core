@@ -10,11 +10,12 @@ import java.util.*
  *     [RFC 9068 SS7.2](https://datatracker.ietf.org/doc/html/rfc9068#section-7.2).
  * @property scope Delegated authority of the calling application, from the `scope` claim defined by
  *     [RFC 6749 SS3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
- * @property properties Additional key-value claims extracted from the token.
+ * @property properties Every claim in the token, with its value as the token carried it. A JSON array
+ *     arrives as a `List`, a nested object as a `Map`, a date as a `Date`.
  */
 data class AuthContextData(
     var userId: UUID,
     var roles: List<String> = emptyList(),
     var scope: List<String> = emptyList(),
-    val properties: Map<String, String> = emptyMap(),
+    val properties: Map<String, Any?> = emptyMap(),
 )

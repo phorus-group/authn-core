@@ -80,9 +80,7 @@ class StandaloneTokenValidator(
         val roles = extractClaimList(claims, config.jwt.claims.roles)
         val scope = extractClaimList(claims, config.jwt.claims.scope)
 
-        val properties = claims.map { (key, value) ->
-            key to value.toString()
-        }.toMap().also { props ->
+        val properties = claims.toMap().also { props ->
             props.forEach { (key, value) ->
                 enabledValidators.filter { it.accepts(key) }.forEach { validator ->
                     if (!validator.isValid(value, props))

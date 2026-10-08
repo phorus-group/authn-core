@@ -22,8 +22,8 @@ package group.phorus.authn.core.services
  * ) : Validator {
  *     override fun accepts(property: String): Boolean = property == Claims.ID
  *
- *     override fun isValid(value: String, properties: Map<String, String>): Boolean =
- *         deviceRepository.findByJti(value)?.let { !it.disabled } ?: false
+ *     override fun isValid(value: Any?, properties: Map<String, Any?>): Boolean =
+ *         deviceRepository.findByJti(value.toString())?.let { !it.disabled } ?: false
  * }
  * ```
  *
@@ -40,9 +40,12 @@ interface Validator {
     /**
      * Validates the claim [value] in the context of all extracted [properties].
      *
+     * Both carry the value as the token carried it, so a JSON array arrives as a `List` and a nested
+     * object as a `Map`. A validator that wants text calls `toString()` itself.
+     *
      * @param value The claim value to validate.
-     * @param properties All extracted claim key-value pairs from the token (for cross-claim validation).
+     * @param properties All claims extracted from the token, for cross-claim validation.
      * @return `true` if valid, `false` to reject the token.
      */
-    fun isValid(value: String, properties: Map<String, String> = emptyMap()): Boolean
+    fun isValid(value: Any?, properties: Map<String, Any?> = emptyMap()): Boolean
 }

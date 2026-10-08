@@ -70,8 +70,8 @@ class StandaloneTokenValidatorTest {
         )
 
         /**
-         * Signs an arbitrary claim set with [SIG_PRIVATE_KEY], bypassing [TokenCreator], so a claim
-         * shape the creator cannot write can still be fed to the validator.
+         * Signs an arbitrary claim set with [SIG_PRIVATE_KEY], so a test can hand the validator any
+         * claim shape an issuer might send.
          */
         private fun signedTokenWith(claims: Map<String, Any>): String {
             val keyBytes = Base64.getDecoder().decode(SIG_PRIVATE_KEY)
@@ -421,6 +421,59 @@ class StandaloneTokenValidatorTest {
     }
 
     @Nested
+    @DisplayName("Structured claim values")
+    inner class StructuredClaimTests {
+
+        @Test
+        fun `a claim holding a JSON array arrives in properties as a list`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf("roles" to listOf("ADMIN", "VIEWER")))
+
+            val properties = authenticator.authenticate(token, enableValidators = false).properties
+            assertInstanceOf(List::class.java, properties["roles"])
+            assertEquals(listOf("ADMIN", "VIEWER"), properties["roles"])
+        }
+
+        @Test
+        fun `a nested object claim arrives in properties as a map`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf(
+                "realm_access" to mapOf("roles" to listOf("ADMIN")),
+            ))
+
+            val properties = authenticator.authenticate(token, enableValidators = false).properties
+            val realmAccess = assertInstanceOf(Map::class.java, properties["realm_access"])
+            assertEquals(listOf("ADMIN"), realmAccess["roles"])
+        }
+
+        @Test
+        fun `a validator is handed the claim value as the token carried it`() {
+            val seen = mutableMapOf<String, Any?>()
+            val capturingValidator = object : Validator {
+                override fun accepts(property: String) = property == "roles"
+                override fun isValid(value: Any?, properties: Map<String, Any?>): Boolean {
+                    seen["value"] = value
+                    seen["fromProperties"] = properties["roles"]
+                    return true
+                }
+            }
+
+            val authenticator = StandaloneTokenValidator(
+                buildConfig(TokenFormat.JWS),
+                listOf(capturingValidator),
+            )
+
+            authenticator.authenticate(signedTokenWith(mapOf("roles" to listOf("ADMIN", "VIEWER"))))
+
+            assertInstanceOf(List::class.java, seen["value"])
+            assertEquals(listOf("ADMIN", "VIEWER"), seen["value"])
+            assertEquals(listOf("ADMIN", "VIEWER"), seen["fromProperties"])
+        }
+    }
+
+    @Nested
     @DisplayName("Validator integration")
     inner class ValidatorTests {
         @Test
@@ -428,7 +481,7 @@ class StandaloneTokenValidatorTest {
             val config = buildConfig(TokenFormat.JWS)
             val rejectingValidator = object : Validator {
                 override fun accepts(property: String) = property == "deviceId"
-                override fun isValid(value: String, properties: Map<String, String>) = false
+                override fun isValid(value: Any?, properties: Map<String, Any?>) = false
             }
 
             val factory = TokenCreator(config)
@@ -448,7 +501,7 @@ class StandaloneTokenValidatorTest {
             val config = buildConfig(TokenFormat.JWS)
             val rejectingValidator = object : Validator {
                 override fun accepts(property: String) = property == "deviceId"
-                override fun isValid(value: String, properties: Map<String, String>) = false
+                override fun isValid(value: Any?, properties: Map<String, Any?>) = false
             }
 
             val factory = TokenCreator(config)

@@ -13,6 +13,7 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Jwks
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.DisplayName
@@ -301,6 +302,23 @@ class IdpTokenValidatorTest {
         }
 
         @Test
+        fun `a structured claim arrives in properties with its shape intact`() {
+            val config = buildConfig(rolesClaim = "realm_access.roles")
+            val locator = createKeyLocator(config)
+            val validator = IdpTokenValidator(config, locator)
+
+            val token = createIdpToken(mapOf(
+                "iss" to ISSUER,
+                "sub" to UUID.randomUUID().toString(),
+                "realm_access" to mapOf("roles" to listOf("ADMIN", "VIEWER")),
+            ))
+
+            val properties = validator.authenticate(token).properties
+            val realmAccess = assertInstanceOf(Map::class.java, properties["realm_access"])
+            assertEquals(listOf("ADMIN", "VIEWER"), realmAccess["roles"])
+        }
+
+        @Test
         fun `blank entries in a claim array are dropped`() {
             val config = buildConfig(rolesClaim = "roles")
             val locator = createKeyLocator(config)
@@ -496,7 +514,7 @@ class IdpTokenValidatorTest {
             val locator = createKeyLocator(config)
             val rejectingValidator = object : Validator {
                 override fun accepts(property: String) = property == "scope"
-                override fun isValid(value: String, properties: Map<String, String>) = false
+                override fun isValid(value: Any?, properties: Map<String, Any?>) = false
             }
             val validator = IdpTokenValidator(config, locator, listOf(rejectingValidator))
 
@@ -517,7 +535,7 @@ class IdpTokenValidatorTest {
             val locator = createKeyLocator(config)
             val rejectingValidator = object : Validator {
                 override fun accepts(property: String) = property == "scope"
-                override fun isValid(value: String, properties: Map<String, String>) = false
+                override fun isValid(value: Any?, properties: Map<String, Any?>) = false
             }
             val validator = IdpTokenValidator(config, locator, listOf(rejectingValidator))
 

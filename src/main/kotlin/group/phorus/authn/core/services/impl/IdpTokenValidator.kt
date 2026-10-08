@@ -30,8 +30,8 @@ import java.util.*
  * - **Subject**: read from the claim named by [config.idp.claims.subject][group.phorus.authn.core.config.ClaimsMapping.subject] (default `sub`).
  * - **Scope** and **roles**: read from the claims named by
  *   [config.idp.claims.scope][group.phorus.authn.core.config.ClaimsMapping.scope] and
- *   [config.idp.claims.roles][group.phorus.authn.core.config.ClaimsMapping.roles], separately and
- *   without merging. Each supports three value formats transparently:
+ *   [config.idp.claims.roles][group.phorus.authn.core.config.ClaimsMapping.roles], each into its own
+ *   field. Both support three value formats transparently:
  *   - Space-separated string (e.g. Auth0 `scope`, Azure AD `scp`)
  *   - JSON array of strings (e.g. Auth0 `permissions`, Okta `scp`, Azure AD `roles`)
  *   - Nested JSON path with dot notation (e.g. Keycloak `realm_access.roles`)
@@ -80,9 +80,7 @@ class IdpTokenValidator(
                 .toByteArray(Charsets.UTF_8)
         ).toString()
 
-        val properties = claims.mapNotNull { (key, value) ->
-            key to value.toString()
-        }.toMap().also { props ->
+        val properties = claims.toMap().also { props ->
             props.forEach { (key, value) ->
                 enabledValidators.filter { it.accepts(key) }.forEach { validator ->
                     if (!validator.isValid(value, props))
