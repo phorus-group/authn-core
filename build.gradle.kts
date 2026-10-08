@@ -14,7 +14,7 @@ plugins {
 
 group = "group.phorus"
 description = "Core authentication library for Phorus services."
-version = "1.0.3"
+version = "2.0.0"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17

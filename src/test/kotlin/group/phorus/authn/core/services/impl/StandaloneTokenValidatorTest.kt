@@ -1,16 +1,20 @@
 package group.phorus.authn.core.services.impl
 
 import group.phorus.authn.core.config.*
+import group.phorus.authn.core.dtos.ExtraClaims
 import group.phorus.authn.core.dtos.TokenType
 import group.phorus.authn.core.services.Validator
 import group.phorus.exception.core.Unauthorized
 import io.jsonwebtoken.Claims
+import io.jsonwebtoken.Jwts
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.*
 
 /**
@@ -37,9 +41,13 @@ class StandaloneTokenValidatorTest {
         private const val ISSUER = "phorus.group"
         private val TEST_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001")
 
-        private fun buildConfig(format: TokenFormat): AuthNConfig = AuthNConfig(
+        private fun buildConfig(
+            format: TokenFormat,
+            claims: ClaimsMapping = ClaimsMapping(),
+        ): AuthNConfig = AuthNConfig(
             mode = AuthMode.STANDALONE,
             jwt = JwtConfig(
+                claims = claims,
                 issuer = ISSUER,
                 tokenFormat = format,
                 signing = SigningConfig(
@@ -60,6 +68,26 @@ class StandaloneTokenValidatorTest {
                 ),
             ),
         )
+
+        /**
+         * Signs an arbitrary claim set with [SIG_PRIVATE_KEY], bypassing [TokenCreator], so a claim
+         * shape the creator cannot write can still be fed to the validator.
+         */
+        private fun signedTokenWith(claims: Map<String, Any>): String {
+            val keyBytes = Base64.getDecoder().decode(SIG_PRIVATE_KEY)
+            val privateKey = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(keyBytes))
+
+            return Jwts.builder()
+                .header()
+                    .add(ExtraClaims.TYPE, TokenType.ACCESS_TOKEN.name)
+                .and()
+                .claims()
+                    .add(mapOf("sub" to TEST_USER_ID.toString(), "jti" to UUID.randomUUID().toString()))
+                    .add(claims)
+                .and()
+                .signWith(privateKey)
+                .compact()
+        }
     }
 
     @Nested
@@ -80,7 +108,7 @@ class StandaloneTokenValidatorTest {
             val authData = authenticator.authenticate(token)
             assertEquals(TEST_USER_ID, authData.userId)
             assertEquals(TokenType.ACCESS_TOKEN, authData.tokenType)
-            assertEquals(listOf("admin", "read"), authData.privileges)
+            assertEquals(listOf("admin", "read"), authData.scope)
             assertNotNull(authData.jti)
         }
 
@@ -158,7 +186,7 @@ class StandaloneTokenValidatorTest {
             val authData = authenticator.authenticate(token)
             assertEquals(TEST_USER_ID, authData.userId)
             assertEquals(TokenType.ACCESS_TOKEN, authData.tokenType)
-            assertEquals(listOf("admin", "read"), authData.privileges)
+            assertEquals(listOf("admin", "read"), authData.scope)
         }
 
         @Test
@@ -218,7 +246,7 @@ class StandaloneTokenValidatorTest {
             val authData = authenticator.authenticate(token)
             assertEquals(TEST_USER_ID, authData.userId)
             assertEquals(TokenType.ACCESS_TOKEN, authData.tokenType)
-            assertEquals(listOf("admin", "read"), authData.privileges)
+            assertEquals(listOf("admin", "read"), authData.scope)
             assertNotNull(authData.jti)
         }
 
@@ -307,6 +335,88 @@ class StandaloneTokenValidatorTest {
 
             val authData = authenticator.authenticate(nestedToken)
             assertEquals(TEST_USER_ID, authData.userId)
+        }
+    }
+
+    @Nested
+    @DisplayName("Claim mapping: roles and scope are read separately")
+    inner class ClaimMappingTests {
+
+        @Test
+        fun `roles claim holding a JSON array is read into roles`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf(
+                "roles" to listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21"),
+            ))
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(
+                listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21"),
+                authData.roles,
+            )
+        }
+
+        @Test
+        fun `scope claim holding a JSON array is read into scope`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf("scope" to listOf("bit:read", "bit:create")))
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+        }
+
+        @Test
+        fun `roles and scope are both read from the same token and stay separate`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf(
+                "roles" to listOf("ADMIN@organization:9b1c"),
+                "scope" to "openid profile",
+            ))
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(listOf("ADMIN@organization:9b1c"), authData.roles)
+            assertEquals(listOf("openid", "profile"), authData.scope)
+        }
+
+        @Test
+        fun `configured claim names replace the registered defaults`() {
+            val config = buildConfig(
+                TokenFormat.JWS,
+                claims = ClaimsMapping(scope = "scp", roles = "realm_access.roles"),
+            )
+            val authenticator = StandaloneTokenValidator(config, emptyList())
+
+            val token = signedTokenWith(mapOf(
+                "scp" to "bit:read bit:create",
+                "realm_access" to mapOf("roles" to listOf("ADMIN", "VIEWER")),
+            ))
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(listOf("ADMIN", "VIEWER"), authData.roles)
+            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+        }
+
+        @Test
+        fun `blank entries in a space-delimited claim are dropped`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val token = signedTokenWith(mapOf("scope" to "  bit:read   bit:create "))
+
+            val authData = authenticator.authenticate(token, enableValidators = false)
+            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+        }
+
+        @Test
+        fun `a missing claim yields an empty list`() {
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val authData = authenticator.authenticate(signedTokenWith(emptyMap()), enableValidators = false)
+
+            assertEquals(emptyList<String>(), authData.roles)
+            assertEquals(emptyList<String>(), authData.scope)
         }
     }
 

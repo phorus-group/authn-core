@@ -70,6 +70,7 @@ data class AuthNConfig(
  * @property signing Signing key material. Required when [tokenFormat] is [TokenFormat.JWS] or [TokenFormat.NESTED_JWE].
  * @property encryption Encryption key material. Required when [tokenFormat] is [TokenFormat.JWE] or [TokenFormat.NESTED_JWE].
  * @property expiration Access-token and refresh-token lifetimes.
+ * @property claims Mapping from claim names to the internal representation, for tokens this library issues.
  */
 data class JwtConfig(
     val issuer: String? = null,
@@ -77,6 +78,7 @@ data class JwtConfig(
     val signing: SigningConfig = SigningConfig(),
     val encryption: EncryptionConfig = EncryptionConfig(),
     val expiration: ExpirationConfig = ExpirationConfig(),
+    val claims: ClaimsMapping = ClaimsMapping(),
 )
 
 /**
@@ -136,7 +138,7 @@ data class ExpirationConfig(
  *     Used to validate the `iss` claim of incoming IdP tokens.
  * @property jwkSetUri URL of the IdP's JWKS endpoint.
  * @property jwksCacheTtlMinutes How long fetched JWKS keys are cached before a refresh. Defaults to `60`.
- * @property claims Mapping from IdP claim names to the internal representation.
+ * @property claims Mapping from the IdP's claim names to the internal representation.
  */
 data class IdpConfig(
     val issuerUri: String? = null,
@@ -161,15 +163,36 @@ data class IdpEncryptionConfig(
 )
 
 /**
- * Maps IdP token claim names to the internal claim names expected by auth-commons.
+ * Maps token claim names to the internal representation.
  *
- * Different IdPs use different claim names (e.g. Keycloak uses `realm_access.roles`,
- * Auth0 uses `permissions`, Azure AD uses `roles`). This mapping normalizes them.
+ * Each default is the claim name its RFC assigns, so a token that follows the standards needs no
+ * configuration here. Set a value under [IdpConfig.claims] when the token comes from an identity
+ * provider that names a claim differently, such as `permissions` at Auth0:
  *
- * @property subject The claim that contains the user identifier. Defaults to `"sub"`.
- * @property privileges The claim that contains scopes / roles / permissions. Defaults to `"scope"`.
+ * ```yaml
+ * idp:
+ *   claims:
+ *     roles: realm_access.roles   # Keycloak
+ *     scope: scp                  # Azure AD
+ * ```
+ *
+ * A value containing `.` is read as a path into a nested object, which is what Keycloak's
+ * `realm_access.roles` requires. [JwtConfig.claims] takes flat names only, since that side writes
+ * the claim.
+ *
+ * `roles` and `scope` are read separately and never merged. Per
+ * [RFC 6749 SS3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3) `scope` is what the
+ * calling application was granted consent to do, while `roles`, registered by
+ * [RFC 9068 SS7.2](https://datatracker.ietf.org/doc/html/rfc9068#section-7.2) and defined by
+ * [RFC 7643 SS4.1.2](https://datatracker.ietf.org/doc/html/rfc7643#section-4.1.2), is a property of
+ * the subject regardless of which application calls.
+ *
+ * @property subject The claim that holds the user identifier. Defaults to `"sub"`.
+ * @property scope The claim that holds delegated application authority. Defaults to `"scope"`.
+ * @property roles The claim that holds subject entitlement. Defaults to `"roles"`.
  */
 data class ClaimsMapping(
     val subject: String = "sub",
-    val privileges: String = "scope",
+    val scope: String = "scope",
+    val roles: String = "roles",
 )

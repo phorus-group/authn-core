@@ -28,20 +28,22 @@ import java.util.*
  *
  * ### Claim extraction
  * - **Subject**: read from the claim named by [config.idp.claims.subject][group.phorus.authn.core.config.ClaimsMapping.subject] (default `sub`).
- * - **Privileges**: read from the claim named by [config.idp.claims.privileges][group.phorus.authn.core.config.ClaimsMapping.privileges] (default `scope`).
- *   Supports three value formats transparently:
+ * - **Scope** and **roles**: read from the claims named by
+ *   [config.idp.claims.scope][group.phorus.authn.core.config.ClaimsMapping.scope] and
+ *   [config.idp.claims.roles][group.phorus.authn.core.config.ClaimsMapping.roles], separately and
+ *   without merging. Each supports three value formats transparently:
  *   - Space-separated string (e.g. Auth0 `scope`, Azure AD `scp`)
  *   - JSON array of strings (e.g. Auth0 `permissions`, Okta `scp`, Azure AD `roles`)
  *   - Nested JSON path with dot notation (e.g. Keycloak `realm_access.roles`)
  *
  * ### IdP compatibility
- * | IdP | Subject config | Privileges config |
- * |-----|---------------|------------------|
- * | Auth0 | `sub` (default) | `permissions` or `scope` |
- * | Azure AD / Entra ID | `oid` | `scp` or `roles` |
- * | Google / Firebase | `sub` (default) | `scope` or custom |
- * | Keycloak | `sub` (default) | `realm_access.roles` |
- * | Okta | `sub` (default) | `scp` or `groups` |
+ * | IdP | Subject config | Scope config | Roles config |
+ * |-----|---------------|--------------|--------------|
+ * | Auth0 | `sub` (default) | `scope` (default) | `permissions` |
+ * | Azure AD / Entra ID | `oid` | `scp` | `roles` (default) |
+ * | Google / Firebase | `sub` (default) | `scope` (default) | custom |
+ * | Keycloak | `sub` (default) | `scope` (default) | `realm_access.roles` |
+ * | Okta | `sub` (default) | `scp` | `groups` |
  *
  * @param config The authentication configuration containing IdP settings.
  * @param keyLocator A JJWT [Locator] that resolves signing keys (e.g. [JwksKeyLocator]).
@@ -70,7 +72,8 @@ class IdpTokenValidator(
             UUID.nameUUIDFromBytes(subject.toByteArray(Charsets.UTF_8))
         }
 
-        val privileges = extractPrivileges(claims, claimsMapping.privileges)
+        val roles = extractClaimList(claims, claimsMapping.roles)
+        val scope = extractClaimList(claims, claimsMapping.scope)
 
         val jti = claims.id ?: UUID.nameUUIDFromBytes(
             "$subject-${claims.issuedAt?.time ?: System.currentTimeMillis()}"
@@ -92,7 +95,8 @@ class IdpTokenValidator(
             userId = userId,
             tokenType = TokenType.ACCESS_TOKEN,
             jti = jti,
-            privileges = privileges,
+            roles = roles,
+            scope = scope,
             properties = properties,
         )
     }
@@ -197,37 +201,4 @@ class IdpTokenValidator(
         }
     }
 
-    private fun extractStringClaim(claims: Claims, claimName: String): String? {
-        val value = resolveClaim(claims, claimName) ?: return null
-        return value.toString()
-    }
-
-    private fun extractPrivileges(claims: Claims, claimName: String): List<String> {
-        val value = resolveClaim(claims, claimName) ?: return emptyList()
-
-        return when (value) {
-            is String -> value.split(" ").filter { it.isNotBlank() }
-            is Collection<*> -> value.mapNotNull { it?.toString() }
-            else -> listOf(value.toString())
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun resolveClaim(claims: Claims, path: String): Any? {
-        if ('.' !in path) {
-            return claims[path]
-        }
-
-        val parts = path.split('.')
-        var current: Any? = claims
-
-        for (part in parts) {
-            current = when (current) {
-                is Map<*, *> -> current[part]
-                else -> return null
-            }
-        }
-
-        return current
-    }
 }

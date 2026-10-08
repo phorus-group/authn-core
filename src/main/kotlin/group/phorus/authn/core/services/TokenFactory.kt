@@ -18,11 +18,13 @@ interface TokenFactory {
      * Creates a short-lived access token for the given [userId].
      *
      * @param userId   Subject (`sub` claim): the authenticated user's identifier.
-     * @param privileges Scopes / roles written into the `scope` claim, space-separated.
+     * @param scope    Delegated authority of the calling application, written space-separated into the
+     *     `scope` claim defined by
+     *     [RFC 6749 SS3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
      * @param properties Additional custom claims to embed in the token payload.
-     * @return An [AccessToken] containing the compact-serialized token string and the privilege list.
+     * @return An [AccessToken] containing the compact-serialized token string and the authority it carries.
      */
-    suspend fun createAccessToken(userId: UUID, privileges: List<String>, properties: Map<String, String> = emptyMap()): AccessToken
+    suspend fun createAccessToken(userId: UUID, scope: List<String>, properties: Map<String, String> = emptyMap()): AccessToken
 
     /**
      * Creates a refresh token for the given [userId].

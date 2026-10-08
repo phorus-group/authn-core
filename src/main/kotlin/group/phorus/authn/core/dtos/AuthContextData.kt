@@ -6,10 +6,15 @@ import java.util.*
  * Data available after successful token authentication. Accessible via
  * [group.phorus.authn.core.context.AuthContext].
  *
+ * @property roles Subject entitlement, from the `roles` claim registered by
+ *     [RFC 9068 SS7.2](https://datatracker.ietf.org/doc/html/rfc9068#section-7.2).
+ * @property scope Delegated authority of the calling application, from the `scope` claim defined by
+ *     [RFC 6749 SS3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
  * @property properties Additional key-value claims extracted from the token.
  */
 data class AuthContextData(
     var userId: UUID,
-    var privileges: List<String>,
+    var roles: List<String> = emptyList(),
+    var scope: List<String> = emptyList(),
     val properties: Map<String, String> = emptyMap(),
 )

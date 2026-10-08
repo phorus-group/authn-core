@@ -36,7 +36,8 @@ import java.util.*
  * 1. Detect format by counting `.` separators.
  * 2. For JWE, peek at the unencrypted JOSE header to check for `cty: "JWT"`.
  * 3. Parse / decrypt / verify as appropriate.
- * 4. Extract standard claims (`sub`, `jti`, `scope`) and the custom `type` header.
+ * 4. Extract `sub`, `jti`, the `scope` and `roles` claims named by
+ *    [config.jwt.claims][group.phorus.authn.core.config.JwtConfig.claims], and the custom `type` header.
  * 5. Run registered [Validator] instances (optional).
  * 6. Return [AuthData].
  *
@@ -76,8 +77,8 @@ class StandaloneTokenValidator(
 
         val jti = claims.id
         val userId = claims.subject.let { UUID.fromString(it) }
-        val privileges: List<String> = (claims["scope"] as? String)
-            ?.split(" ") ?: emptyList()
+        val roles = extractClaimList(claims, config.jwt.claims.roles)
+        val scope = extractClaimList(claims, config.jwt.claims.scope)
 
         val properties = claims.map { (key, value) ->
             key to value.toString()
@@ -94,7 +95,8 @@ class StandaloneTokenValidator(
             userId = userId,
             tokenType = tokenType,
             jti = jti,
-            privileges = privileges,
+            roles = roles,
+            scope = scope,
             properties = properties,
         )
     }

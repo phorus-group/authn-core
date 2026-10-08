@@ -27,7 +27,7 @@ interface Authenticator {
      * @param jwt              The compact-serialized token (without the `Bearer ` prefix).
      * @param enableValidators When `true` (default), registered [Validator] instances are invoked
      *                         after claim extraction. Set to `false` to skip custom validation.
-     * @return Parsed [AuthData] containing user ID, token type, JTI, privileges, and custom properties.
+     * @return Parsed [AuthData] containing user ID, token type, JTI, roles, scope, and custom properties.
      * @throws group.phorus.exception.core.Unauthorized on any validation failure.
      */
     fun authenticate(jwt: String, enableValidators: Boolean = true): AuthData

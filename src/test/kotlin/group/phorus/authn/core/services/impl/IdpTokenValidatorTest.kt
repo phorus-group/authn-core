@@ -118,7 +118,8 @@ class IdpTokenValidatorTest {
 
         private fun buildConfig(
             subjectClaim: String = "sub",
-            privilegesClaim: String = "scope",
+            scopeClaim: String = "scope",
+            rolesClaim: String = "roles",
         ) = AuthNConfig(
             mode = AuthMode.IDP_DELEGATED,
             idp = IdpConfig(
@@ -126,14 +127,16 @@ class IdpTokenValidatorTest {
                 jwkSetUri = jwksUri(),
                 claims = ClaimsMapping(
                     subject = subjectClaim,
-                    privileges = privilegesClaim,
+                    scope = scopeClaim,
+                    roles = rolesClaim,
                 ),
             ),
         )
 
         private fun buildEncryptedConfig(
             subjectClaim: String = "sub",
-            privilegesClaim: String = "scope",
+            scopeClaim: String = "scope",
+            rolesClaim: String = "roles",
         ) = AuthNConfig(
             mode = AuthMode.IDP_DELEGATED,
             idp = IdpConfig(
@@ -141,7 +144,8 @@ class IdpTokenValidatorTest {
                 jwkSetUri = jwksUri(),
                 claims = ClaimsMapping(
                     subject = subjectClaim,
-                    privileges = privilegesClaim,
+                    scope = scopeClaim,
+                    roles = rolesClaim,
                 ),
                 encryption = IdpEncryptionConfig(
                     algorithm = "RSA",
@@ -158,7 +162,7 @@ class IdpTokenValidatorTest {
     inner class Auth0StyleTests {
         @Test
         fun `extracts subject and permissions array`() {
-            val config = buildConfig(subjectClaim = "sub", privilegesClaim = "permissions")
+            val config = buildConfig(subjectClaim = "sub", rolesClaim = "permissions")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -170,12 +174,12 @@ class IdpTokenValidatorTest {
 
             val authData = validator.authenticate(token)
             assertNotNull(authData.userId)
-            assertEquals(listOf("read:users", "write:users", "admin"), authData.privileges)
+            assertEquals(listOf("read:users", "write:users", "admin"), authData.roles)
         }
 
         @Test
         fun `extracts space-separated scope string`() {
-            val config = buildConfig(subjectClaim = "sub", privilegesClaim = "scope")
+            val config = buildConfig(subjectClaim = "sub", scopeClaim = "scope")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -186,7 +190,7 @@ class IdpTokenValidatorTest {
             ))
 
             val authData = validator.authenticate(token)
-            assertEquals(listOf("openid", "profile", "email", "read:users"), authData.privileges)
+            assertEquals(listOf("openid", "profile", "email", "read:users"), authData.scope)
         }
     }
 
@@ -195,7 +199,7 @@ class IdpTokenValidatorTest {
     inner class AzureAdStyleTests {
         @Test
         fun `extracts oid as subject and roles array`() {
-            val config = buildConfig(subjectClaim = "oid", privilegesClaim = "roles")
+            val config = buildConfig(subjectClaim = "oid", rolesClaim = "roles")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -210,12 +214,12 @@ class IdpTokenValidatorTest {
 
             val authData = validator.authenticate(token)
             assertEquals(UUID.fromString(oid), authData.userId)
-            assertEquals(listOf("User.ReadWrite", "Application.Admin"), authData.privileges)
+            assertEquals(listOf("User.ReadWrite", "Application.Admin"), authData.roles)
         }
 
         @Test
         fun `extracts scp as space-separated string`() {
-            val config = buildConfig(subjectClaim = "oid", privilegesClaim = "scp")
+            val config = buildConfig(subjectClaim = "oid", scopeClaim = "scp")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -228,7 +232,7 @@ class IdpTokenValidatorTest {
             ))
 
             val authData = validator.authenticate(token)
-            assertEquals(listOf("User.Read", "Mail.Send"), authData.privileges)
+            assertEquals(listOf("User.Read", "Mail.Send"), authData.scope)
         }
     }
 
@@ -237,7 +241,7 @@ class IdpTokenValidatorTest {
     inner class KeycloakStyleTests {
         @Test
         fun `extracts roles from nested realm_access path`() {
-            val config = buildConfig(subjectClaim = "sub", privilegesClaim = "realm_access.roles")
+            val config = buildConfig(subjectClaim = "sub", rolesClaim = "realm_access.roles")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -251,12 +255,12 @@ class IdpTokenValidatorTest {
 
             val authData = validator.authenticate(token)
             assertEquals(UUID.fromString(userId), authData.userId)
-            assertEquals(listOf("admin", "user", "manager"), authData.privileges)
+            assertEquals(listOf("admin", "user", "manager"), authData.roles)
         }
 
         @Test
         fun `returns empty list when nested path does not exist`() {
-            val config = buildConfig(subjectClaim = "sub", privilegesClaim = "realm_access.roles")
+            val config = buildConfig(subjectClaim = "sub", rolesClaim = "realm_access.roles")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -267,7 +271,49 @@ class IdpTokenValidatorTest {
             ))
 
             val authData = validator.authenticate(token)
-            assertEquals(emptyList<String>(), authData.privileges)
+            assertEquals(emptyList<String>(), authData.roles)
+        }
+    }
+
+    @Nested
+    @DisplayName("Claim mapping: roles and scope are read separately")
+    inner class ClaimMappingTests {
+        @Test
+        fun `reads both claims from one token and keeps them apart`() {
+            val config = buildConfig(scopeClaim = "scope", rolesClaim = "roles")
+            val locator = createKeyLocator(config)
+            val validator = IdpTokenValidator(config, locator)
+
+            val userId = UUID.randomUUID()
+            val token = createIdpToken(mapOf(
+                "iss" to ISSUER,
+                "sub" to userId.toString(),
+                "scope" to "openid profile",
+                "roles" to listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21"),
+            ))
+
+            val authData = validator.authenticate(token)
+            assertEquals(listOf("openid", "profile"), authData.scope)
+            assertEquals(
+                listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21"),
+                authData.roles,
+            )
+        }
+
+        @Test
+        fun `blank entries in a claim array are dropped`() {
+            val config = buildConfig(rolesClaim = "roles")
+            val locator = createKeyLocator(config)
+            val validator = IdpTokenValidator(config, locator)
+
+            val token = createIdpToken(mapOf(
+                "iss" to ISSUER,
+                "sub" to UUID.randomUUID().toString(),
+                "roles" to listOf("ADMIN", "", "  "),
+            ))
+
+            val authData = validator.authenticate(token)
+            assertEquals(listOf("ADMIN"), authData.roles)
         }
     }
 
@@ -276,7 +322,7 @@ class IdpTokenValidatorTest {
     inner class EdgeCaseTests {
         @Test
         fun `missing subject claim throws Unauthorized`() {
-            val config = buildConfig(subjectClaim = "sub", privilegesClaim = "scope")
+            val config = buildConfig(subjectClaim = "sub", scopeClaim = "scope")
             val locator = createKeyLocator(config)
             val validator = IdpTokenValidator(config, locator)
 
@@ -377,7 +423,7 @@ class IdpTokenValidatorTest {
 
             val authData = validator.authenticate(token)
             assertEquals(userId, authData.userId)
-            assertEquals(listOf("read", "write"), authData.privileges)
+            assertEquals(listOf("read", "write"), authData.scope)
         }
 
         @Test
@@ -414,7 +460,7 @@ class IdpTokenValidatorTest {
 
             val authData = validator.authenticate(token)
             assertEquals(userId, authData.userId)
-            assertEquals(listOf("read", "write", "admin"), authData.privileges)
+            assertEquals(listOf("read", "write", "admin"), authData.scope)
         }
 
         @Test

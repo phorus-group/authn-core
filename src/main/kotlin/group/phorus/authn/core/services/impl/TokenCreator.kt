@@ -60,7 +60,7 @@ class TokenCreator(
 
     override suspend fun createAccessToken(
         userId: UUID,
-        privileges: List<String>,
+        scope: List<String>,
         properties: Map<String, String>,
     ): AccessToken {
         val currentTime = Instant.now()
@@ -71,7 +71,7 @@ class TokenCreator(
             userId = userId,
             currentTime = currentTime,
             expiration = expiration,
-            privileges = privileges,
+            scope = scope,
             properties = properties,
         )
 
@@ -79,7 +79,7 @@ class TokenCreator(
 
         return AccessToken(
             token = token,
-            privileges = privileges,
+            scope = scope,
         )
     }
 
@@ -98,7 +98,7 @@ class TokenCreator(
             userId = userId,
             currentTime = currentTime,
             expiration = expiration,
-            privileges = null,
+            scope = null,
             properties = properties,
         )
 
@@ -192,7 +192,7 @@ class TokenCreator(
         userId: UUID,
         currentTime: Instant,
         expiration: Instant?,
-        privileges: List<String>?,
+        scope: List<String>?,
         properties: Map<String, String>,
     ): Map<String, Any> = buildMap {
         val jti = UUID.randomUUID().toString()
@@ -202,7 +202,7 @@ class TokenCreator(
         config.jwt.issuer?.let { put("iss", it) }
         put("iat", Date.from(currentTime))
         expiration?.let { put("exp", Date.from(it)) }
-        privileges?.let { put("scope", it.joinToString(" ")) }
+        scope?.let { put(config.jwt.claims.scope, it.joinToString(" ")) }
         properties.forEach { (key, value) -> put(key, value) }
     }
 
