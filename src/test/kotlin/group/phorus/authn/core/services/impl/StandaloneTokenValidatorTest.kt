@@ -46,12 +46,22 @@ class StandaloneTokenValidatorTest {
         private fun buildConfig(
             format: TokenFormat,
             claims: ClaimsMapping = ClaimsMapping(),
+            issuer: String? = ISSUER,
+            audience: String? = null,
+            requireAudience: Boolean = false,
+            requireIssuer: Boolean = false,
+            clockSkewSeconds: Long = 0,
+            tokenMinutes: Long = 10,
         ): AuthNConfig = AuthNConfig(
             mode = AuthMode.STANDALONE,
             jwt = JwtConfig(
                 claims = claims,
-                issuer = ISSUER,
+                issuer = issuer,
                 tokenFormat = format,
+                audience = audience,
+                requireAudience = requireAudience,
+                requireIssuer = requireIssuer,
+                clockSkewSeconds = clockSkewSeconds,
                 signing = SigningConfig(
                     algorithm = "EC",
                     encodedPrivateKey = SIG_PRIVATE_KEY,
@@ -64,10 +74,7 @@ class StandaloneTokenValidatorTest {
                     encodedPublicKey = ENC_PUBLIC_KEY,
                     encodedPrivateKey = ENC_PRIVATE_KEY,
                 ),
-                expiration = ExpirationConfig(
-                    tokenMinutes = 525_9600,       // ~10 years
-                    refreshTokenMinutes = 525_9600, // ~10 years
-                ),
+                expiration = ExpirationConfig(tokenMinutes = tokenMinutes),
             ),
         )
 
@@ -370,6 +377,160 @@ class StandaloneTokenValidatorTest {
     }
 
     @Nested
+    @DisplayName("Audience, issuer and clock skew")
+    inner class RegisteredClaimValidationTests {
+        private val audienceConfig = buildConfig(
+            TokenFormat.JWS,
+            audience = "orders-service",
+            requireAudience = true,
+        )
+
+        @Test
+        fun `the audience is written when configured`(): Unit = runBlocking {
+            val config = buildConfig(TokenFormat.JWS, audience = "orders-service")
+            val token = TokenCreator(config).createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            val claims = StandaloneTokenValidator(config, emptyList())
+                .authenticate(token, enableValidators = false).properties
+
+            // RFC 7519 SS4.1.3 allows aud to hold one value or an array, and JJWT parses either into a Set
+            assertEquals(setOf("orders-service"), claims["aud"])
+        }
+
+        @Test
+        fun `no audience claim is written when none is configured`(): Unit = runBlocking {
+            val config = buildConfig(TokenFormat.JWS)
+            val token = TokenCreator(config).createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            val claims = StandaloneTokenValidator(config, emptyList())
+                .authenticate(token, enableValidators = false).properties
+
+            assertFalse(claims.containsKey("aud"))
+        }
+
+        @Test
+        fun `a token issued for another audience is refused`() {
+            val token = signedTokenWith(mapOf("aud" to "billing-service"))
+
+            val ex = assertThrows<Unauthorized> {
+                StandaloneTokenValidator(audienceConfig, emptyList())
+                    .authenticate(token, enableValidators = false)
+            }
+            assertTrue(ex.message!!.contains("aud"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `a token with no audience is refused when an audience is required`() {
+            val ex = assertThrows<Unauthorized> {
+                StandaloneTokenValidator(audienceConfig, emptyList())
+                    .authenticate(signedTokenWith(emptyMap()), enableValidators = false)
+            }
+            assertTrue(ex.message!!.contains("aud"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `the right audience is accepted`() {
+            val token = signedTokenWith(mapOf("aud" to "orders-service"))
+
+            val authData = StandaloneTokenValidator(audienceConfig, emptyList())
+                .authenticate(token, enableValidators = false)
+            assertEquals(TEST_USER_ID, authData.userId)
+        }
+
+        @Test
+        fun `a token from another issuer is refused when the issuer is required`() {
+            val config = buildConfig(TokenFormat.JWS, requireIssuer = true)
+            val token = signedTokenWith(mapOf("iss" to "someone-else"))
+
+            val ex = assertThrows<Unauthorized> {
+                StandaloneTokenValidator(config, emptyList()).authenticate(token, enableValidators = false)
+            }
+            assertTrue(ex.message!!.contains("iss"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `a token with no issuer is refused when the issuer is required`() {
+            val config = buildConfig(TokenFormat.JWS, requireIssuer = true)
+
+            val ex = assertThrows<Unauthorized> {
+                StandaloneTokenValidator(config, emptyList())
+                    .authenticate(signedTokenWith(emptyMap()), enableValidators = false)
+            }
+            assertTrue(ex.message!!.contains("iss"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `the configured issuer is accepted`() {
+            val config = buildConfig(TokenFormat.JWS, requireIssuer = true)
+            val token = signedTokenWith(mapOf("iss" to ISSUER))
+
+            val authData = StandaloneTokenValidator(config, emptyList())
+                .authenticate(token, enableValidators = false)
+            assertEquals(TEST_USER_ID, authData.userId)
+        }
+
+        @Test
+        fun `another issuer is accepted while the issuer is not required`() {
+            val config = buildConfig(TokenFormat.JWS)
+            val token = signedTokenWith(mapOf("iss" to "someone-else"))
+
+            val authData = StandaloneTokenValidator(config, emptyList())
+                .authenticate(token, enableValidators = false)
+            assertEquals(TEST_USER_ID, authData.userId)
+        }
+
+        @Test
+        fun `a token expired inside the clock skew is accepted`(): Unit = runBlocking {
+            val minting = buildConfig(TokenFormat.JWS, tokenMinutes = -1)
+            val token = TokenCreator(minting).createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            val validating = buildConfig(TokenFormat.JWS, clockSkewSeconds = 300)
+
+            val authData = StandaloneTokenValidator(validating, emptyList())
+                .authenticate(token, enableValidators = false)
+            assertEquals(TEST_USER_ID, authData.userId)
+        }
+
+        @Test
+        fun `a token expired beyond the clock skew is refused`(): Unit = runBlocking {
+            val minting = buildConfig(TokenFormat.JWS, tokenMinutes = -10)
+            val token = TokenCreator(minting).createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            val validating = buildConfig(TokenFormat.JWS, clockSkewSeconds = 60)
+
+            assertThrows<Unauthorized> {
+                StandaloneTokenValidator(validating, emptyList())
+                    .authenticate(token, enableValidators = false)
+            }
+        }
+
+        @Test
+        fun `an expired token is refused when no skew is allowed`(): Unit = runBlocking {
+            val minting = buildConfig(TokenFormat.JWS, tokenMinutes = -1)
+            val token = TokenCreator(minting).createAccessToken(TEST_USER_ID, listOf("openid")).token
+
+            assertThrows<Unauthorized> {
+                StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+                    .authenticate(token, enableValidators = false)
+            }
+        }
+
+        @Test
+        fun `requiring an audience without configuring one is refused at construction`() {
+            val config = buildConfig(TokenFormat.JWS, requireAudience = true)
+
+            assertThrows<IllegalArgumentException> { StandaloneTokenValidator(config, emptyList()) }
+        }
+
+        @Test
+        fun `requiring an issuer without configuring one is refused at construction`() {
+            val config = buildConfig(TokenFormat.JWS, issuer = null, requireIssuer = true)
+
+            assertThrows<IllegalArgumentException> { StandaloneTokenValidator(config, emptyList()) }
+        }
+    }
+
+    @Nested
     @DisplayName("The typ header")
     inner class TypeHeaderTests {
         private val config = buildConfig(TokenFormat.JWS)
@@ -473,13 +634,13 @@ class StandaloneTokenValidatorTest {
         fun `configured claim names replace the registered defaults`() {
             val config = buildConfig(
                 TokenFormat.JWS,
-                claims = ClaimsMapping(scope = "scp", roles = "realm_access.roles"),
+                claims = ClaimsMapping(scope = "scp", roles = "entitlements"),
             )
             val authenticator = StandaloneTokenValidator(config, emptyList())
 
             val token = signedTokenWith(mapOf(
                 "scp" to "bit:read bit:create",
-                "realm_access" to mapOf("roles" to listOf("ADMIN", "VIEWER")),
+                "entitlements" to listOf("ADMIN", "VIEWER"),
             ))
 
             val authData = authenticator.authenticate(token, enableValidators = false)

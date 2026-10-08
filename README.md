@@ -346,7 +346,9 @@ what goes in them.
 - In **standalone mode**, your service creates the tokens, so you choose the values, and
   `JwtConfig.claims` names the claims to write and read.
 - In **IdP modes**, the IdP writes the claims. Different IdPs use different names: `scope`, `scp`,
-  `permissions`, `roles`, `groups`. `IdpConfig.claims` names the claims to read.
+  `permissions`, `roles`, `groups`. `IdpConfig.claims` names the claims to read, and a name there may
+  use dot notation to reach a nested claim. `JwtConfig.claims` takes flat names, since that side
+  writes the claim as a top-level claim, and a name containing `.` is refused at construction.
 
 ## Configuration
 
@@ -366,17 +368,21 @@ The `AuthNConfig` data class provides all settings needed for token creation and
 | `jwt.encryption.aeadAlgorithm` | `String` | `"A192CBC-HS384"` | JJWT content-encryption algorithm |
 | `jwt.encryption.encodedPublicKey` | `String?` | `null` | Base64 X.509 public key for encryption |
 | `jwt.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for decryption |
-| `jwt.claims.subject` | `String` | `"sub"` | Claim name for the user identifier |
-| `jwt.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority |
-| `jwt.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement |
+| `jwt.claims.subject` | `String` | `"sub"` | Claim name for the user identifier, flat |
+| `jwt.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority, flat |
+| `jwt.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement, flat |
 | `jwt.expiration.tokenMinutes` | `Long` | `10` | Access token lifetime in minutes |
 | `jwt.expiration.refreshTokenMinutes` | `Long` | `1440` | Refresh token lifetime in minutes |
+| `jwt.audience` | `String?` | `null` | `aud` claim written into every created token |
+| `jwt.requireAudience` | `Boolean` | `false` | Accept an incoming token only if its `aud` holds `jwt.audience` |
+| `jwt.requireIssuer` | `Boolean` | `false` | Accept an incoming token only if its `iss` holds `jwt.issuer` |
+| `jwt.clockSkewSeconds` | `Long` | `0` | Tolerance applied to `exp` and `nbf`, for clock drift between services |
 | `idp.issuerUri` | `String?` | `null` | IdP issuer identifier, validates `iss` claim |
 | `idp.jwkSetUri` | `String?` | `null` | URL of the IdP's JWKS endpoint |
 | `idp.jwksCacheTtlMinutes` | `Long` | `60` | How long fetched JWKS keys are cached |
-| `idp.claims.subject` | `String` | `"sub"` | Claim name for the user identifier |
-| `idp.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority |
-| `idp.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement |
+| `idp.claims.subject` | `String` | `"sub"` | Claim name for the user identifier, dot notation allowed |
+| `idp.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority, dot notation allowed |
+| `idp.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement, dot notation allowed |
 | `idp.encryption.algorithm` | `String` | `"RSA"` | Key algorithm for IdP JWE decryption |
 | `idp.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for IdP JWE decryption |
 
@@ -771,7 +777,13 @@ rm key.pem private.der public.der
 - **Never commit keys** to version control. Use environment variables or a secrets manager.
 - **Rotate keys** regularly. The JWKS cache auto-refreshes on unknown `kid` values.
 - **Keep token lifetimes short** (10 minutes for access tokens) and use refresh tokens for long sessions.
-- **Validate the issuer** to prevent token confusion attacks. `IdpTokenValidator` validates the `iss` claim automatically against `IdpConfig.issuerUri`. For standalone tokens, use a custom `Validator` if needed.
+- **Validate the issuer** to prevent token confusion attacks. `IdpTokenValidator` validates the `iss` claim automatically against `IdpConfig.issuerUri`. For standalone tokens, set `jwt.requireIssuer` to `true` alongside `jwt.issuer`.
+
+  Set `jwt.audience` with `jwt.requireAudience` so a token minted for another service is refused.
+  Both checks reject every token already in flight that lacks the claim, so roll them out in two
+  steps: deploy with `jwt.audience` and `jwt.issuer` set and the two flags off, wait out the longest
+  token lifetime, then turn the flags on. Use `jwt.clockSkewSeconds` where clocks between the
+  issuing and validating services can drift.
 
 ## Standards references
 

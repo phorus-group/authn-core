@@ -65,6 +65,8 @@ class StandaloneTokenValidator(
             if (format == TokenFormat.JWS || format == TokenFormat.NESTED_JWE) {
                 validateSigningConfig()
             }
+
+            validateClaimRequirements()
         }
     }
 
@@ -178,10 +180,20 @@ class StandaloneTokenValidator(
         return Pair(mergedHeader, innerJws.payload)
     }
 
+    /**
+     * A parser carrying the registered-claim requirements from
+     * [config.jwt][group.phorus.authn.core.config.JwtConfig], each behind its own flag.
+     */
+    private fun parserBuilder(): JwtParserBuilder = Jwts.parser().apply {
+        if (config.jwt.requireAudience) config.jwt.audience?.let { requireAudience(it) }
+        if (config.jwt.requireIssuer) config.jwt.issuer?.let { requireIssuer(it) }
+        if (config.jwt.clockSkewSeconds > 0) clockSkewSeconds(config.jwt.clockSkewSeconds)
+    }
+
     private fun verifyJws(jwt: String): Jws<Claims> =
         runCatching {
             val publicKey = resolveSigningPublicKey()
-            Jwts.parser().verifyWith(publicKey).build().parseSignedClaims(jwt)
+            parserBuilder().verifyWith(publicKey).build().parseSignedClaims(jwt)
         }.getOrElse { handleParsingException(it) }
 
     /**
@@ -190,7 +202,7 @@ class StandaloneTokenValidator(
     private fun decryptJweClaims(jwt: String): Jwe<Claims> =
         runCatching {
             val privateKey = resolveEncryptionPrivateKey()
-            Jwts.parser().decryptWith(privateKey).build().parseEncryptedClaims(jwt)
+            parserBuilder().decryptWith(privateKey).build().parseEncryptedClaims(jwt)
         }.getOrElse { handleParsingException(it) }
 
     /**
@@ -200,18 +212,32 @@ class StandaloneTokenValidator(
     private fun decryptJweContent(jwt: String): Pair<JweHeader, ByteArray> =
         runCatching {
             val privateKey = resolveEncryptionPrivateKey()
-            val jwe = Jwts.parser().decryptWith(privateKey).build().parseEncryptedContent(jwt)
+            val jwe = parserBuilder().decryptWith(privateKey).build().parseEncryptedContent(jwt)
             Pair(jwe.header, jwe.payload)
         }.getOrElse { handleParsingException(it) }
 
     private fun <T> handleParsingException(it: Throwable): T {
         when (it) {
+            is IncorrectClaimException -> throw Unauthorized("JWT Token validation failed: ${it.claimName}")
+            is MissingClaimException -> throw Unauthorized("JWT Token missing required claim: ${it.claimName}")
             is SecurityException,
             is IllegalArgumentException,
             is MalformedJwtException,
             is UnsupportedJwtException -> throw Unauthorized("Invalid JWT Token")
             is ExpiredJwtException -> throw Unauthorized("JWT Token expired")
             else -> throw Unauthorized("Unknown exception related to the JWT Token: ${it.message}")
+        }
+    }
+
+    private fun validateClaimRequirements() {
+        requireFlatClaimNames(config.jwt.claims)
+
+        require(!config.jwt.requireAudience || config.jwt.audience != null) {
+            "An audience must be set to require one"
+        }
+
+        require(!config.jwt.requireIssuer || config.jwt.issuer != null) {
+            "An issuer must be set to require one"
         }
     }
 

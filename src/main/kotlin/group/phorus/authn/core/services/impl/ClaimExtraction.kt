@@ -1,5 +1,6 @@
 package group.phorus.authn.core.services.impl
 
+import group.phorus.authn.core.config.ClaimsMapping
 import io.jsonwebtoken.Claims
 
 /**
@@ -33,6 +34,35 @@ internal fun toClaimList(value: Any?): List<String> {
  */
 internal fun extractStringClaim(claims: Claims, path: String): String? =
     resolveClaim(claims, path)?.toString()
+
+/**
+ * Requires the claim names this library writes to be flat.
+ *
+ * A dot means different things on each side. Writing puts the name at the top level of the payload,
+ * so `realm_access.roles` becomes one key containing a dot:
+ *
+ * ```json
+ * { "realm_access.roles": ["ADMIN"] }
+ * ```
+ *
+ * Reading treats the dot as a path and looks for `roles` inside an object called `realm_access`:
+ *
+ * ```json
+ * { "realm_access": { "roles": ["ADMIN"] } }
+ * ```
+ *
+ * The reader would find nothing and return an empty list, so a dotted name is refused here. A name
+ * used only for reading may be dotted, since there the nesting comes from whoever issued the token.
+ */
+internal fun requireFlatClaimNames(claims: ClaimsMapping) {
+    val nested = listOf("subject" to claims.subject, "scope" to claims.scope, "roles" to claims.roles)
+        .filter { '.' in it.second }
+
+    require(nested.isEmpty()) {
+        val names = nested.joinToString(", ") { "${it.first}=${it.second}" }
+        "Dot notation is only available for an IdP's claim names, so jwt.claims needs flat names: $names"
+    }
+}
 
 private fun resolveClaim(claims: Claims, path: String): Any? {
     if ('.' !in path) return claims[path]

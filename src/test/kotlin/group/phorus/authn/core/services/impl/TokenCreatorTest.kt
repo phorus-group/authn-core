@@ -311,10 +311,6 @@ class TokenCreatorTest {
                 encodedPublicKey = encPub,
                 encodedPrivateKey = encPriv,
             ),
-            expiration = ExpirationConfig(
-                tokenMinutes = 525_9600,
-                refreshTokenMinutes = 525_9600,
-            ),
         ),
     )
 }

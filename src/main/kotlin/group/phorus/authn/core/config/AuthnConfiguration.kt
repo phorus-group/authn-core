@@ -73,6 +73,16 @@ data class AuthNConfig(
  * @property claims Claim names for tokens this library issues and validates. A name here has to be a
  *     flat claim name, since the issuing side writes it as a top-level claim; dot notation belongs to
  *     [IdpConfig.claims], where the token comes from somewhere else.
+ * @property audience The `aud` (audience) claim written into every token created by this library,
+ *     naming the service the token is for, per
+ *     [RFC 7519 SS4.1.3](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.3).
+ * @property requireAudience When `true`, an incoming token is accepted only if its `aud` claim holds
+ *     [audience]. Needs [audience] to be set. Defaults to `false`.
+ * @property requireIssuer When `true`, an incoming token is accepted only if its `iss` claim holds
+ *     [issuer]. Needs [issuer] to be set. Defaults to `false`.
+ * @property clockSkewSeconds How far an `exp` or `nbf` claim may be off before it is held against the
+ *     token, which covers clock drift between the issuing and validating services per
+ *     [RFC 7519 SS4.1.4](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.4). Defaults to `0`.
  */
 data class JwtConfig(
     val issuer: String? = null,
@@ -81,6 +91,10 @@ data class JwtConfig(
     val encryption: EncryptionConfig = EncryptionConfig(),
     val expiration: ExpirationConfig = ExpirationConfig(),
     val claims: ClaimsMapping = ClaimsMapping(),
+    val audience: String? = null,
+    val requireAudience: Boolean = false,
+    val requireIssuer: Boolean = false,
+    val clockSkewSeconds: Long = 0,
 )
 
 /**

@@ -44,6 +44,8 @@ class TokenCreator(
     private val tokenFormat: TokenFormat get() = config.jwt.tokenFormat
 
     init {
+        requireFlatClaimNames(config.jwt.claims)
+
         // Only validate keys when the service will actually create tokens
         if (config.mode != AuthMode.IDP_DELEGATED) {
             val format = config.jwt.tokenFormat
@@ -212,6 +214,7 @@ class TokenCreator(
             config.jwt.issuer?.let { put("iss", it) }
             put("iat", Date.from(currentTime))
             expiration?.let { put("exp", Date.from(it)) }
+            config.jwt.audience?.let { put("aud", it) }
         }
     }
 
