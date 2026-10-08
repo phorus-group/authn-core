@@ -70,7 +70,9 @@ data class AuthNConfig(
  * @property signing Signing key material. Required when [tokenFormat] is [TokenFormat.JWS] or [TokenFormat.NESTED_JWE].
  * @property encryption Encryption key material. Required when [tokenFormat] is [TokenFormat.JWE] or [TokenFormat.NESTED_JWE].
  * @property expiration Access-token and refresh-token lifetimes.
- * @property claims Mapping from claim names to the internal representation, for tokens this library issues.
+ * @property claims Claim names for tokens this library issues and validates. A name here has to be a
+ *     flat claim name, since the issuing side writes it as a top-level claim; dot notation belongs to
+ *     [IdpConfig.claims], where the token comes from somewhere else.
  */
 data class JwtConfig(
     val issuer: String? = null,

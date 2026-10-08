@@ -31,7 +31,7 @@ For Spring Boot auto-configuration (filters, YAML config, API keys, privilege ga
     - [IDP_DELEGATED](#idp_delegated)
   - [Identity Providers (IdPs)](#identity-providers-idps)
     - [IdP claim mapping reference](#idp-claim-mapping-reference)
-  - [Privileges](#privileges)
+  - [Roles and scope](#roles-and-scope)
 - [Configuration](#configuration)
 - [Core implementations](#core-implementations)
   - [TokenCreator](#tokencreator)
@@ -123,13 +123,13 @@ val config = AuthNConfig(
 val tokenCreator = TokenCreator(config)
 val accessToken = tokenCreator.createAccessToken(
     userId = UUID.randomUUID(),
-    privileges = listOf("read", "write"),
+    claims = mapOf("roles" to listOf("ADMIN@organization:9b1c")),
 )
 
 // 3. Validate tokens
 val validator = StandaloneTokenValidator(config, validators = emptyList())
 val authData = validator.authenticate(accessToken.token)
-println("User: ${authData.userId}, Privileges: ${authData.privileges}")
+println("User: ${authData.userId}, Roles: ${authData.roles}, Scope: ${authData.scope}")
 ```
 
 ## Core concepts
@@ -307,39 +307,46 @@ whose corresponding public key is registered with the IdP.
 Different IdPs use different claim names. Configure `IdpConfig.claims` to tell the library which
 claims to read:
 
-| IdP | Subject claim | Privileges claim | Notes |
-|-----|--------------|-----------------|-------|
-| Auth0 | `sub` (default) | `permissions` or `scope` | Subject format: `"auth0\|abc123"` |
-| Azure AD / Entra ID | `oid` | `roles` or `scp` | `oid` is the user object ID |
-| Google / Firebase | `sub` (default) | `scope` or custom | |
-| Keycloak | `sub` (default) | `realm_access.roles` | Dot notation for nested claims |
-| Okta | `sub` (default) | `scp` or `groups` | |
+| IdP | Subject claim | Scope claim | Roles claim | Notes |
+|-----|--------------|-------------|-------------|-------|
+| Auth0 | `sub` (default) | `scope` (default) | `permissions` | Subject format: `"auth0\|abc123"` |
+| Azure AD / Entra ID | `oid` | `scp` | `roles` (default) | `oid` is the user object ID |
+| Google / Firebase | `sub` (default) | `scope` (default) | custom | |
+| Keycloak | `sub` (default) | `scope` (default) | `realm_access.roles` | Dot notation for nested claims |
+| Okta | `sub` (default) | `scp` | `groups` | |
 
-Privilege extraction supports three formats transparently:
+Claim extraction supports three formats transparently:
 - **Space-separated string**: `"read write admin"` (Auth0 `scope`, Azure AD `scp`)
 - **JSON array**: `["read", "write", "admin"]` (Auth0 `permissions`, Okta `scp`, Azure AD `roles`)
 - **Nested path with dot notation**: `realm_access.roles` resolves `{"realm_access": {"roles": ["admin"]}}` (Keycloak)
 
-### Privileges
+### Roles and scope
 
-Privileges are a list of strings that describe what the user is allowed to do. They are stored
-inside the token as a claim and extracted by the library into `AuthData.privileges`.
+A token carries two independent lists of authority, and the library reads each into its own field.
+
+| Field | Claim | Standard | Holds |
+|---|---|---|---|
+| `AuthData.roles` | `roles` | [RFC 9068 SS7.2](https://datatracker.ietf.org/doc/html/rfc9068#section-7.2), [RFC 7643 SS4.1.2](https://datatracker.ietf.org/doc/html/rfc7643#section-4.1.2) | What the subject is, regardless of which application calls |
+| `AuthData.scope` | `scope` | [RFC 6749 SS3.3](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3) | What the calling application was granted consent to do on the subject's behalf |
 
 ```kotlin
 val authData = authenticator.authenticate(token)
-if ("admin" in authData.privileges) {
-    // user has admin access
-}
+
+val isOrganizationAdmin = "ADMIN@organization:$organizationId" in authData.roles
+val mayCreateBits = authData.scope.isEmpty() || "bit:create" in authData.scope
 ```
 
-The library does not manage where privileges come from. It only reads them from the token.
-Whoever creates the token is responsible for putting the right privileges in it.
+Effective authority is the intersection: an application never exceeds the subject it acts for, and
+never gains an action the subject did not consent to. A first-party client with
+no third-party integrations leaves `scope` holding `openid profile email` or nothing at all.
 
-- In **standalone mode**, your service creates the tokens, so you decide what privileges to include
-  (e.g. from your database).
-- In **IdP modes**, the IdP embeds privileges in the token. Different IdPs call them different
-  things: `scope`, `scp`, `permissions`, `roles`, `groups`, etc.
-  The `ClaimsMapping.privileges` property tells the library which claim name to read.
+The library reads both claims from the token and nothing else. Whoever creates the token decides
+what goes in them.
+
+- In **standalone mode**, your service creates the tokens, so you choose the values, and
+  `JwtConfig.claims` names the claims to write and read.
+- In **IdP modes**, the IdP writes the claims. Different IdPs use different names: `scope`, `scp`,
+  `permissions`, `roles`, `groups`. `IdpConfig.claims` names the claims to read.
 
 ## Configuration
 
@@ -359,13 +366,17 @@ The `AuthNConfig` data class provides all settings needed for token creation and
 | `jwt.encryption.aeadAlgorithm` | `String` | `"A192CBC-HS384"` | JJWT content-encryption algorithm |
 | `jwt.encryption.encodedPublicKey` | `String?` | `null` | Base64 X.509 public key for encryption |
 | `jwt.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for decryption |
+| `jwt.claims.subject` | `String` | `"sub"` | Claim name for the user identifier |
+| `jwt.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority |
+| `jwt.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement |
 | `jwt.expiration.tokenMinutes` | `Long` | `10` | Access token lifetime in minutes |
 | `jwt.expiration.refreshTokenMinutes` | `Long` | `1440` | Refresh token lifetime in minutes |
 | `idp.issuerUri` | `String?` | `null` | IdP issuer identifier, validates `iss` claim |
 | `idp.jwkSetUri` | `String?` | `null` | URL of the IdP's JWKS endpoint |
 | `idp.jwksCacheTtlMinutes` | `Long` | `60` | How long fetched JWKS keys are cached |
 | `idp.claims.subject` | `String` | `"sub"` | Claim name for the user identifier |
-| `idp.claims.privileges` | `String` | `"scope"` | Claim name for scopes/roles/permissions |
+| `idp.claims.scope` | `String` | `"scope"` | Claim name for delegated application authority |
+| `idp.claims.roles` | `String` | `"roles"` | Claim name for subject entitlement |
 | `idp.encryption.algorithm` | `String` | `"RSA"` | Key algorithm for IdP JWE decryption |
 | `idp.encryption.encodedPrivateKey` | `String?` | `null` | Base64 PKCS#8 private key for IdP JWE decryption |
 
@@ -375,6 +386,22 @@ The `AuthNConfig` data class provides all settings needed for token creation and
 
 `TokenCreator` implements the `TokenFactory` interface. It creates access and refresh tokens in
 the configured format (JWS, JWE, or nested JWE). Pass an `AuthNConfig` to its constructor.
+
+Pass claims as a map to control their JSON type, which is what a list claim such as `roles`
+requires:
+
+```kotlin
+val accessToken = tokenCreator.createAccessToken(
+    userId = user.id,
+    claims = mapOf(
+        "roles" to listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21"),
+        "scope" to "openid profile",
+    ),
+)
+```
+
+`jti`, `sub`, `iss`, `iat`, `exp`, `nbf` and `aud` are written by the library from `AuthNConfig` and
+the `userId` argument. Passing one of those names throws `IllegalArgumentException` naming the key.
 
 ### StandaloneTokenValidator
 
@@ -395,7 +422,7 @@ signature verification.
 
 Token format is auto-detected: JWS, JWE, or nested JWE. Claim extraction is configurable via
 `IdpConfig.claims` to support different IdP claim conventions (Auth0, Azure AD, Keycloak, Okta, etc.).
-Supports space-separated strings, JSON arrays, and nested dot-notation paths for privilege extraction.
+Supports space-separated strings, JSON arrays, and nested dot-notation paths for claim extraction.
 
 ```kotlin
 val config = AuthNConfig(
@@ -403,7 +430,7 @@ val config = AuthNConfig(
     idp = IdpConfig(
         issuerUri = "https://idp.example.com",
         jwkSetUri = "https://idp.example.com/.well-known/jwks.json",
-        claims = ClaimsMapping(subject = "sub", privileges = "permissions"),
+        claims = ClaimsMapping(subject = "sub", roles = "permissions"),
     ),
 )
 val keyLocator = JwksKeyLocator(config.idp)
@@ -432,7 +459,7 @@ from anywhere in the call stack within the same thread.
 
 ```kotlin
 // Store
-AuthContext.context.set(AuthContextData(userId = user.id, privileges = user.privileges))
+AuthContext.context.set(AuthContextData(userId = user.id, roles = user.roles))
 
 // Read
 val auth: AuthContextData? = AuthContext.context.get()
@@ -464,10 +491,10 @@ val metadata: Map<String, String> = apiKey?.metadata ?: emptyMap()
 
 | Type | Description |
 |------|-------------|
-| `AuthContextData` | User ID, privilege list, and custom properties from a validated token |
-| `AuthData` | Raw token data after parsing: user ID, token type, JTI, privileges |
+| `AuthContextData` | User ID, roles, scope, and every claim of a validated token |
+| `AuthData` | Raw token data after parsing: user ID, token type, JTI, roles, scope, claims |
 | `TokenType` | `ACCESS_TOKEN` or `REFRESH_TOKEN` |
-| `AccessToken` | Issued token: compact JWT string and its privilege list |
+| `AccessToken` | Issued token: compact JWT string, roles, and scope |
 | `HTTPContextData` | Request path, method (as String), headers, query params, timestamps |
 | `ApiKeyContextData` | API key identifier and metadata after successful validation |
 
@@ -476,8 +503,8 @@ val metadata: Map<String, String> = apiKey?.metadata ?: emptyMap()
 | Interface | Description |
 |-----------|-------------|
 | `Authenticator` | Validates a compact JWT and returns `AuthData`. Exposes low-level `parseSignedClaims` / `parseEncryptedClaims` for JWS/JWE. |
-| `TokenFactory` | Creates signed/encrypted access and refresh tokens. |
-| `Validator` | Pluggable claim validator invoked after token parsing. |
+| `TokenFactory` | Creates signed/encrypted access and refresh tokens, from a claims map or from a scope list. |
+| `Validator` | Pluggable claim validator invoked after token parsing, receiving each claim value as parsed. |
 
 Core implementations: `TokenCreator` (implements `TokenFactory`), `StandaloneTokenValidator`
 (implements `Authenticator`), and `IdpTokenValidator` (implements `Authenticator`).

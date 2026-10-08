@@ -62,44 +62,44 @@ class TokenCreator(
         userId: UUID,
         scope: List<String>,
         properties: Map<String, String>,
-    ): AccessToken {
-        val currentTime = Instant.now()
-        val expiration = currentTime.plusSeconds(config.jwt.expiration.tokenMinutes * 60)
-
-        val claimsMap = buildClaimsMap(
-            tokenType = TokenType.ACCESS_TOKEN,
-            userId = userId,
-            currentTime = currentTime,
-            expiration = expiration,
-            scope = scope,
-            properties = properties,
-        )
-
-        val token = buildToken(claimsMap, TokenType.ACCESS_TOKEN)
-
-        return AccessToken(
-            token = token,
-            scope = scope,
-        )
-    }
+    ): AccessToken = createAccessToken(
+        userId = userId,
+        claims = properties + (config.jwt.claims.scope to scope.joinToString(" ")),
+    )
 
     override suspend fun createRefreshToken(
         userId: UUID,
         expires: Boolean,
         properties: Map<String, String>,
-    ): String {
+    ): String = createRefreshToken(userId = userId, claims = properties, expires = expires)
+
+    override suspend fun createAccessToken(userId: UUID, claims: Map<String, Any>): AccessToken {
         val currentTime = Instant.now()
-        val expiration = if (expires) {
-            currentTime.plusSeconds(config.jwt.expiration.refreshTokenMinutes * 60)
-        } else null
 
         val claimsMap = buildClaimsMap(
-            tokenType = TokenType.REFRESH_TOKEN,
             userId = userId,
             currentTime = currentTime,
-            expiration = expiration,
-            scope = null,
-            properties = properties,
+            expiration = currentTime.plusSeconds(config.jwt.expiration.tokenMinutes * 60),
+            callerClaims = claims,
+        )
+
+        return AccessToken(
+            token = buildToken(claimsMap, TokenType.ACCESS_TOKEN),
+            roles = toClaimList(claims[config.jwt.claims.roles]),
+            scope = toClaimList(claims[config.jwt.claims.scope]),
+        )
+    }
+
+    override suspend fun createRefreshToken(userId: UUID, claims: Map<String, Any>, expires: Boolean): String {
+        val currentTime = Instant.now()
+
+        val claimsMap = buildClaimsMap(
+            userId = userId,
+            currentTime = currentTime,
+            expiration = if (expires) {
+                currentTime.plusSeconds(config.jwt.expiration.refreshTokenMinutes * 60)
+            } else null,
+            callerClaims = claims,
         )
 
         return buildToken(claimsMap, TokenType.REFRESH_TOKEN)
@@ -187,23 +187,33 @@ class TokenCreator(
             .compact()
     }
 
+    /**
+     * Writes [callerClaims] first and the registered claims after them, so the claims this library
+     * owns are the ones that reach the token. A caller key among them is refused outright rather
+     * than overwritten, because a mint site asking for `sub` or `exp` is asking for something it
+     * cannot have and a silent drop would hide that.
+     */
     private fun buildClaimsMap(
-        tokenType: TokenType,
         userId: UUID,
         currentTime: Instant,
         expiration: Instant?,
-        scope: List<String>?,
-        properties: Map<String, String>,
-    ): Map<String, Any> = buildMap {
-        val jti = UUID.randomUUID().toString()
+        callerClaims: Map<String, Any>,
+    ): Map<String, Any> {
+        val reserved = callerClaims.keys.filter { it in RESERVED_CLAIM_NAMES }
+        require(reserved.isEmpty()) {
+            "Claim ${reserved.sorted().joinToString("', '", "'", "'")} is reserved and written by " +
+                "this library. Reserved names: ${RESERVED_CLAIM_NAMES.sorted().joinToString(", ")}"
+        }
 
-        put("jti", jti)
-        put("sub", userId.toString())
-        config.jwt.issuer?.let { put("iss", it) }
-        put("iat", Date.from(currentTime))
-        expiration?.let { put("exp", Date.from(it)) }
-        scope?.let { put(config.jwt.claims.scope, it.joinToString(" ")) }
-        properties.forEach { (key, value) -> put(key, value) }
+        return buildMap {
+            putAll(callerClaims)
+
+            put("jti", UUID.randomUUID().toString())
+            put("sub", userId.toString())
+            config.jwt.issuer?.let { put("iss", it) }
+            put("iat", Date.from(currentTime))
+            expiration?.let { put("exp", Date.from(it)) }
+        }
     }
 
     private fun resolveSigningPrivateKey(): PrivateKey {
@@ -261,5 +271,14 @@ class TokenCreator(
                 "Signature algorithm '$algId' not found. Available: ${Jwts.SIG.get().keys}"
             }
         }
+    }
+
+    companion object {
+        /**
+         * The claim names registered by
+         * [RFC 7519 SS4.1](https://datatracker.ietf.org/doc/html/rfc7519#section-4.1) that this
+         * library writes itself.
+         */
+        private val RESERVED_CLAIM_NAMES = setOf("jti", "sub", "iss", "iat", "exp", "nbf", "aud")
     }
 }

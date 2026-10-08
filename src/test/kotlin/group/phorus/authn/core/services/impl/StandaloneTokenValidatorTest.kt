@@ -1,6 +1,7 @@
 package group.phorus.authn.core.services.impl
 
 import group.phorus.authn.core.config.*
+import group.phorus.authn.core.dtos.AccessToken
 import group.phorus.authn.core.dtos.ExtraClaims
 import group.phorus.authn.core.dtos.TokenType
 import group.phorus.authn.core.services.Validator
@@ -421,6 +422,128 @@ class StandaloneTokenValidatorTest {
     }
 
     @Nested
+    @DisplayName("Minting with a claims map")
+    inner class ClaimsMapMintTests {
+        private val config = buildConfig(TokenFormat.JWS)
+        private val factory = TokenCreator(config)
+        private val authenticator = StandaloneTokenValidator(config, emptyList())
+
+        @Test
+        fun `a list claim is written as a JSON array and read back as a list`(): Unit = runBlocking {
+            val entries = listOf("ADMIN@organization:9b1c", "VIEWER@organization:7a21")
+
+            val accessToken = factory.createAccessToken(TEST_USER_ID, mapOf("roles" to entries))
+            val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
+
+            assertEquals(entries, authData.roles)
+            assertInstanceOf(List::class.java, authData.properties["roles"])
+        }
+
+        @Test
+        fun `the returned AccessToken reports the authority the token carries`() = runBlocking {
+            val accessToken = factory.createAccessToken(
+                TEST_USER_ID,
+                mapOf("roles" to listOf("ADMIN@organization:9b1c"), "scope" to "openid profile"),
+            )
+
+            assertEquals(listOf("ADMIN@organization:9b1c"), accessToken.roles)
+            assertEquals(listOf("openid", "profile"), accessToken.scope)
+        }
+
+        @Test
+        fun `a nested object claim survives the round trip`(): Unit = runBlocking {
+            val accessToken = factory.createAccessToken(
+                TEST_USER_ID,
+                mapOf("realm_access" to mapOf("roles" to listOf("ADMIN"))),
+            )
+            val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
+
+            val realmAccess = assertInstanceOf(Map::class.java, authData.properties["realm_access"])
+            assertEquals(listOf("ADMIN"), realmAccess["roles"])
+        }
+
+        @Test
+        fun `a refresh token carries its claims map`(): Unit = runBlocking {
+            val token = factory.createRefreshToken(
+                TEST_USER_ID,
+                mapOf("deviceEpoch" to listOf("a", "b")),
+                expires = true,
+            )
+            val authData = authenticator.authenticate(token, enableValidators = false)
+
+            assertEquals(TokenType.REFRESH_TOKEN, authData.tokenType)
+            assertInstanceOf(List::class.java, authData.properties["deviceEpoch"])
+        }
+
+        @Test
+        fun `each registered claim name is rejected by name`() {
+            listOf("jti", "sub", "iss", "iat", "exp", "nbf", "aud").forEach { reserved ->
+                val ex = assertThrows<IllegalArgumentException> {
+                    runBlocking { factory.createAccessToken(TEST_USER_ID, mapOf(reserved to "anything")) }
+                }
+                assertTrue(
+                    ex.message!!.contains(reserved),
+                    "the message must name the offending key, was: ${ex.message}",
+                )
+            }
+        }
+
+        @Test
+        fun `a registered claim name is rejected on the refresh path too`() {
+            val ex = assertThrows<IllegalArgumentException> {
+                runBlocking {
+                    factory.createRefreshToken(TEST_USER_ID, mapOf("exp" to 1L), expires = true)
+                }
+            }
+            assertTrue(ex.message!!.contains("exp"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `a registered claim name is rejected on the properties path too`() {
+            val ex = assertThrows<IllegalArgumentException> {
+                runBlocking {
+                    factory.createAccessToken(TEST_USER_ID, listOf("openid"), mapOf("sub" to "someone-else"))
+                }
+            }
+            assertTrue(ex.message!!.contains("sub"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `the subject stays the given user id`() = runBlocking {
+            val accessToken = factory.createAccessToken(TEST_USER_ID, mapOf("roles" to listOf("ADMIN")))
+            val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
+
+            assertEquals(TEST_USER_ID, authData.userId)
+            assertEquals(ISSUER, authData.properties["iss"])
+        }
+
+        @Test
+        fun `an unsupported implementation says which method to override`() {
+            val bare = object : group.phorus.authn.core.services.TokenFactory {
+                override suspend fun createAccessToken(
+                    userId: UUID,
+                    scope: List<String>,
+                    properties: Map<String, String>,
+                ) = AccessToken("")
+
+                override suspend fun createRefreshToken(
+                    userId: UUID,
+                    expires: Boolean,
+                    properties: Map<String, String>,
+                ) = ""
+            }
+
+            val ex = assertThrows<UnsupportedOperationException> {
+                runBlocking { bare.createAccessToken(TEST_USER_ID, mapOf("roles" to listOf("ADMIN"))) }
+            }
+            assertTrue(
+                ex.message!!.contains("createAccessToken"),
+                "was: ${ex.message}",
+            )
+        }
+    }
+
+    @Nested
     @DisplayName("Structured claim values")
     inner class StructuredClaimTests {
 
@@ -446,6 +569,18 @@ class StandaloneTokenValidatorTest {
             val properties = authenticator.authenticate(token, enableValidators = false).properties
             val realmAccess = assertInstanceOf(Map::class.java, properties["realm_access"])
             assertEquals(listOf("ADMIN"), realmAccess["roles"])
+        }
+
+        @Test
+        fun `a numeric date claim arrives as a count of seconds`(): Unit = runBlocking {
+            val accessToken = TokenCreator(buildConfig(TokenFormat.JWS))
+                .createAccessToken(TEST_USER_ID, listOf("openid"))
+            val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
+
+            val properties = authenticator.authenticate(accessToken.token, enableValidators = false).properties
+
+            assertInstanceOf(java.lang.Long::class.java, properties[Claims.ISSUED_AT])
+            assertInstanceOf(java.lang.Long::class.java, properties[Claims.EXPIRATION])
         }
 
         @Test

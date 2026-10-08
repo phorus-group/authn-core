@@ -10,8 +10,14 @@ import io.jsonwebtoken.Claims
  *
  * [path] may use dot notation to read a nested claim, as Keycloak's `realm_access.roles` needs.
  */
-internal fun extractClaimList(claims: Claims, path: String): List<String> {
-    val value = resolveClaim(claims, path) ?: return emptyList()
+internal fun extractClaimList(claims: Claims, path: String): List<String> =
+    toClaimList(resolveClaim(claims, path))
+
+/**
+ * Reads one claim value as a list of strings, under the same rules as [extractClaimList].
+ */
+internal fun toClaimList(value: Any?): List<String> {
+    if (value == null) return emptyList()
 
     val raw = when (value) {
         is String -> value.split(" ")

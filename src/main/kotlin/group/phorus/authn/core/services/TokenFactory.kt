@@ -38,4 +38,39 @@ interface TokenFactory {
      * @return The compact-serialized refresh-token string.
      */
     suspend fun createRefreshToken(userId: UUID, expires: Boolean, properties: Map<String, String> = emptyMap()): String
+
+    /**
+     * Creates a short-lived access token carrying [claims] as the payload.
+     *
+     * A claim value keeps the type it is given, so a `List` is written as a JSON array and a `Map` as
+     * a nested object. The registered names `jti`, `sub`, `iss`, `iat`, `exp`, `nbf` and `aud` belong
+     * to the library and are rejected.
+     *
+     * An implementation of this interface must override this method.
+     *
+     * @param userId Subject (`sub` claim): the authenticated user's identifier.
+     * @param claims Claims to write into the token payload.
+     * @return An [AccessToken] containing the compact-serialized token string and the authority it carries.
+     */
+    suspend fun createAccessToken(userId: UUID, claims: Map<String, Any>): AccessToken =
+        throw UnsupportedOperationException(
+            "${this::class.simpleName} must override createAccessToken(userId, claims)"
+        )
+
+    /**
+     * Creates a refresh token carrying [claims] as the payload, under the same rules as
+     * [createAccessToken].
+     *
+     * An implementation of this interface must override this method.
+     *
+     * @param userId Subject (`sub` claim).
+     * @param claims Claims to write into the token payload.
+     * @param expires When `true`, the token expires after the configured `refresh-token-minutes`,
+     *                when `false`, no `exp` claim is set.
+     * @return The compact-serialized refresh-token string.
+     */
+    suspend fun createRefreshToken(userId: UUID, claims: Map<String, Any>, expires: Boolean): String =
+        throw UnsupportedOperationException(
+            "${this::class.simpleName} must override createRefreshToken(userId, claims, expires)"
+        )
 }
