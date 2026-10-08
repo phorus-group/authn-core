@@ -12,6 +12,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.Key
 import java.security.PublicKey
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -27,10 +28,16 @@ import kotlin.concurrent.write
  * Uses [java.net.http.HttpClient] for HTTP calls, so this class has no framework dependencies.
  *
  * ### Key resolution strategy
- * 1. Look up the `kid` (Key ID) from the JWS header in the local cache.
- * 2. If the key is **not** found and the cache has not been refreshed within the last
- *    cooldown period (30 seconds), fetch fresh keys from the JWKS endpoint.
- * 3. If the key is **still** not found after a refresh, throw an exception.
+ * 1. A cached key younger than [IdpConfig.jwksCacheTtlMinutes] is returned straight away.
+ * 2. Anything else, an unknown `kid` or a cache past its TTL, fetches fresh keys, as long as the last
+ *    attempt was more than the 30-second cooldown ago. The cooldown bounds how often a lookup reaches
+ *    the endpoint, and the TTL bounds how stale a key can be before a refresh is attempted.
+ * 3. A failed fetch still serves the cached key for a `kid` the cache holds, so an outage at the
+ *    issuer costs freshness instead of every authenticated request. A `kid` the cache does not hold
+ *    throws, since there is nothing to serve and the fetch failure is the useful diagnostic.
+ *
+ * A key rotation at the issuer therefore takes effect within the cooldown, which is what a token
+ * signed by a brand-new `kid` needs.
  *
  * ### Thread safety
  * All cache operations are protected by a [ReentrantReadWriteLock].
@@ -40,10 +47,12 @@ import kotlin.concurrent.write
  *
  * @param config The IdP configuration containing the JWKS endpoint URI and cache TTL.
  * @param httpClient The HTTP client used to fetch JWKS. Defaults to a new instance.
+ * @param clock The source of time for the cache TTL and the refresh cooldown.
  */
 class JwksKeyLocator(
     private val config: IdpConfig,
     private val httpClient: HttpClient = HttpClient.newHttpClient(),
+    private val clock: Clock = Clock.systemUTC(),
 ) : LocatorAdapter<Key>() {
 
     private val log = LoggerFactory.getLogger(JwksKeyLocator::class.java)
@@ -52,6 +61,9 @@ class JwksKeyLocator(
 
     @Volatile
     private var lastFetchTime: Instant = Instant.EPOCH
+
+    @Volatile
+    private var lastAttemptTime: Instant = Instant.EPOCH
 
     private val lock = ReentrantReadWriteLock()
 
@@ -63,19 +75,25 @@ class JwksKeyLocator(
         val kid = header.keyId
             ?: throw SecurityException("JWS token is missing the 'kid' (Key ID) header parameter")
 
-        lock.read {
-            keyCache[kid]?.let { return it }
+        if (!isCacheExpired()) {
+            lock.read {
+                keyCache[kid]?.let { return it }
+            }
         }
 
-        refreshKeysIfNeeded()
+        val cached = lock.read { keyCache[kid] }
 
-        return lock.read {
-            keyCache[kid]
-                ?: throw SecurityException(
-                    "No key found for kid '$kid' in JWKS from ${config.jwkSetUri}. " +
-                    "Available kids: ${keyCache.keys}"
-                )
+        runCatching { refreshKeysIfNeeded() }.onFailure {
+            if (cached == null) throw it
+            log.warn("Serving a stale key for kid '{}', JWKS refresh failed: {}", kid, it.message)
         }
+
+        return lock.read { keyCache[kid] }
+            ?: cached
+            ?: throw SecurityException(
+                "No key found for kid '$kid' in JWKS from ${config.jwkSetUri}. " +
+                "Available kids: ${keyCache.keys}"
+            )
     }
 
     fun forceRefresh() {
@@ -84,20 +102,20 @@ class JwksKeyLocator(
         }
     }
 
-    private fun refreshKeysIfNeeded() {
-        val now = Instant.now()
-        val minRefreshInterval = maxOf(cacheTtl, refreshCooldown)
+    private fun isCacheExpired(): Boolean =
+        Duration.between(lastFetchTime, clock.instant()) >= cacheTtl
 
-        if (Duration.between(lastFetchTime, now) < minRefreshInterval) {
+    private fun refreshKeysIfNeeded() {
+        if (Duration.between(lastAttemptTime, clock.instant()) < refreshCooldown) {
             return
         }
 
         lock.write {
-            val timeSinceLastFetch = Duration.between(lastFetchTime, now)
-            if (timeSinceLastFetch < minRefreshInterval) {
+            if (Duration.between(lastAttemptTime, clock.instant()) < refreshCooldown) {
                 return
             }
 
+            lastAttemptTime = clock.instant()
             fetchAndCacheKeys()
         }
     }
@@ -150,6 +168,6 @@ class JwksKeyLocator(
 
         keyCache.clear()
         keyCache.putAll(newKeys)
-        lastFetchTime = Instant.now()
+        lastFetchTime = clock.instant()
     }
 }

@@ -447,8 +447,17 @@ val authData = validator.authenticate(idpToken)
 ### JwksKeyLocator
 
 `JwksKeyLocator` is a JJWT `LocatorAdapter<Key>` that fetches public keys from an IdP's JWKS
-endpoint using `java.net.http.HttpClient` (no framework dependencies). It caches keys in memory
-with a configurable TTL and includes a cooldown to prevent excessive fetches.
+endpoint using `java.net.http.HttpClient` (no framework dependencies).
+
+Two intervals govern the cache. `idp.jwksCacheTtlMinutes` bounds how long a key is served before a
+refresh is attempted, and a 30-second cooldown bounds how often a lookup can reach the endpoint. A
+`kid` the cache does not hold triggers a fetch as soon as the cooldown allows, so a key rotation at
+the issuer takes effect within the cooldown.
+
+When the fetch fails, a `kid` the cache holds is still served and the failure is logged at warn, so
+an outage at the issuer costs freshness instead of every authenticated request. A `kid` the cache
+does not hold throws the fetch failure. Pass a `Clock` to the constructor to drive both intervals
+from a supplied clock.
 
 **Note:** The `locate()` and `forceRefresh()` methods perform blocking HTTP calls. When calling
 from a coroutine context, wrap in `withContext(Dispatchers.IO)`.

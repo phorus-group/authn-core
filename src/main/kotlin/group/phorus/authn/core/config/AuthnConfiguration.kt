@@ -64,8 +64,8 @@ data class AuthNConfig(
 /**
  * JWT-level configuration: issuer, token format, signing keys, encryption keys, and expiration.
  *
- * @property issuer The `iss` (issuer) claim written into every token created by this library.
- *     Also used to validate incoming tokens in [AuthMode.STANDALONE] and [AuthMode.IDP_BRIDGE] modes.
+ * @property issuer The `iss` (issuer) claim written into every token created by this library. An
+ *     incoming token's `iss` is checked against it only when [requireIssuer] is `true`.
  * @property tokenFormat Token serialization format. Defaults to [TokenFormat.JWS].
  * @property signing Signing key material. Required when [tokenFormat] is [TokenFormat.JWS] or [TokenFormat.NESTED_JWE].
  * @property encryption Encryption key material. Required when [tokenFormat] is [TokenFormat.JWE] or [TokenFormat.NESTED_JWE].

@@ -65,9 +65,9 @@ class StandaloneTokenValidator(
             if (format == TokenFormat.JWS || format == TokenFormat.NESTED_JWE) {
                 validateSigningConfig()
             }
-
-            validateClaimRequirements()
         }
+
+        validateClaimRequirements()
     }
 
     override fun authenticate(jwt: String, enableValidators: Boolean): AuthData {
@@ -79,7 +79,10 @@ class StandaloneTokenValidator(
             ?: throw Unauthorized("Authentication failed, please log in again")
 
         val jti = claims.id
-        val userId = claims.subject.let { UUID.fromString(it) }
+            ?: throw Unauthorized("Authentication failed, please log in again")
+
+        val userId = runCatching { UUID.fromString(claims.subject) }
+            .getOrElse { throw Unauthorized("Authentication failed, please log in again") }
         val roles = extractClaimList(claims, config.jwt.claims.roles)
         val scope = extractClaimList(claims, config.jwt.claims.scope)
 

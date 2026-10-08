@@ -78,7 +78,6 @@ class StandaloneTokenValidatorTest {
             ),
         )
 
-        /** The value the library writes into the [ExtraClaims.TYPE] header for a given type. */
         private fun typeHeaderValue(type: TokenType): String = type.mediaType
 
         private fun signingPrivateKey() = KeyFactory.getInstance("EC")
@@ -101,6 +100,18 @@ class StandaloneTokenValidatorTest {
                 .and()
                 .claims()
                     .add(mapOf("sub" to TEST_USER_ID.toString(), "jti" to UUID.randomUUID().toString()))
+                    .add(claims)
+                .and()
+                .signWith(signingPrivateKey())
+                .compact()
+
+        /** Signs exactly the claims given, with no `sub` or `jti` added. */
+        private fun rawSignedToken(claims: Map<String, Any>): String =
+            Jwts.builder()
+                .header()
+                    .add(ExtraClaims.TYPE, typeHeaderValue(TokenType.ACCESS_TOKEN))
+                .and()
+                .claims()
                     .add(claims)
                 .and()
                 .signWith(signingPrivateKey())
@@ -757,6 +768,19 @@ class StandaloneTokenValidatorTest {
         }
 
         @Test
+        fun `the scope argument wins over a scope entry in properties`(): Unit = runBlocking {
+            val accessToken = factory.createAccessToken(
+                TEST_USER_ID,
+                listOf("bit:read"),
+                mapOf("scope" to "admin:everything"),
+            )
+
+            val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
+            assertEquals(listOf("bit:read"), authData.scope)
+            assertEquals(listOf("bit:read"), accessToken.scope)
+        }
+
+        @Test
         fun `the subject stays the given user id`() = runBlocking {
             val accessToken = factory.createAccessToken(TEST_USER_ID, mapOf("roles" to listOf("ADMIN")))
             val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
@@ -905,6 +929,30 @@ class StandaloneTokenValidatorTest {
     inner class ErrorTests {
         private val config = buildConfig(TokenFormat.JWS)
         private val authenticator = StandaloneTokenValidator(config, emptyList())
+
+        @Test
+        fun `a token with no jti is refused`() {
+            val token = rawSignedToken(mapOf("sub" to TEST_USER_ID.toString()))
+
+            assertThrows<Unauthorized> { authenticator.authenticate(token, enableValidators = false) }
+        }
+
+        @Test
+        fun `a token with no subject is refused`() {
+            val token = rawSignedToken(mapOf("jti" to UUID.randomUUID().toString()))
+
+            assertThrows<Unauthorized> { authenticator.authenticate(token, enableValidators = false) }
+        }
+
+        @Test
+        fun `a token whose subject is not a UUID is refused`() {
+            val token = rawSignedToken(mapOf(
+                "jti" to UUID.randomUUID().toString(),
+                "sub" to "auth0|abc123",
+            ))
+
+            assertThrows<Unauthorized> { authenticator.authenticate(token, enableValidators = false) }
+        }
 
         @Test
         fun `invalid token string throws Unauthorized`() {

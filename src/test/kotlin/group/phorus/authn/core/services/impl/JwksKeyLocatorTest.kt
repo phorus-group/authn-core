@@ -17,10 +17,16 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
+import java.net.http.HttpClient
 import java.security.KeyPairGenerator
 import java.security.PublicKey
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 class JwksKeyLocatorTest {
 
@@ -86,6 +92,17 @@ class JwksKeyLocatorTest {
                             .withBody(responseBody)
                     )
             )
+        }
+
+        /** A clock a test moves by hand, so a cooldown or a TTL can pass without waiting for it. */
+        private class TestClock(private var now: Instant = Instant.parse("2026-01-01T00:00:00Z")) : Clock() {
+            override fun instant(): Instant = now
+            override fun getZone(): ZoneId = ZoneOffset.UTC
+            override fun withZone(zone: ZoneId): Clock = this
+
+            fun advance(duration: Duration) {
+                now = now.plus(duration)
+            }
         }
 
         private fun mockJwsHeader(kid: String?): io.jsonwebtoken.JwsHeader {
@@ -205,14 +222,124 @@ class JwksKeyLocatorTest {
     inner class CooldownAndTtl {
 
         @Test
-        fun `does not re-fetch within cooldown period`() {
+        fun `re-fetches for an unknown kid once the cooldown has passed`() {
             stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
-            val locator = JwksKeyLocator(buildConfig())
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(), HttpClient.newHttpClient(), clock)
 
             locator.locate(mockJwsHeader(KID_1))
 
-            assertThrows<SecurityException> { locator.locate(mockJwsHeader("unknown-kid")) }
+            wireMock.resetAll()
+            stubJwksEndpoint(buildJwksJson(
+                KID_1 to ecKeyPair1.public as ECPublicKey,
+                KID_2 to ecKeyPair2.public as ECPublicKey,
+            ))
+            clock.advance(Duration.ofSeconds(31))
 
+            assertNotNull(locator.locate(mockJwsHeader(KID_2)))
+            wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `holds off a second fetch for an unknown kid inside the cooldown`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+            clock.advance(Duration.ofSeconds(5))
+
+            assertThrows<SecurityException> { locator.locate(mockJwsHeader("unknown-kid")) }
+            wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `re-fetches a cached kid once the cache TTL has passed`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 60), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+            clock.advance(Duration.ofMinutes(61))
+            locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.verify(2, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `serves a cached kid within the TTL without re-fetching`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 60), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+            clock.advance(Duration.ofMinutes(59))
+            locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `serves a stale cached kid when the refresh fails`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 60), HttpClient.newHttpClient(), clock)
+
+            val fresh = locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.resetAll()
+            stubJwksEndpoint("", status = 500)
+            clock.advance(Duration.ofMinutes(61))
+
+            assertEquals(fresh, locator.locate(mockJwsHeader(KID_1)))
+            wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `an unknown kid throws the fetch failure when the refresh fails`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 60), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.resetAll()
+            stubJwksEndpoint("", status = 500)
+            clock.advance(Duration.ofSeconds(31))
+
+            val ex = assertThrows<SecurityException> { locator.locate(mockJwsHeader(KID_2)) }
+            assertTrue(ex.message!!.contains("Failed to fetch JWKS"), "was: ${ex.message}")
+        }
+
+        @Test
+        fun `a failing endpoint is left alone until the cooldown passes`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 60), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.resetAll()
+            stubJwksEndpoint("", status = 500)
+            clock.advance(Duration.ofMinutes(61))
+
+            locator.locate(mockJwsHeader(KID_1))
+            clock.advance(Duration.ofSeconds(5))
+            locator.locate(mockJwsHeader(KID_1))
+
+            wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
+        }
+
+        @Test
+        fun `serves an expired cached kid while the cooldown holds`() {
+            stubJwksEndpoint(buildJwksJson(KID_1 to ecKeyPair1.public as ECPublicKey))
+            val clock = TestClock()
+            val locator = JwksKeyLocator(buildConfig(cacheTtlMinutes = 0), HttpClient.newHttpClient(), clock)
+
+            locator.locate(mockJwsHeader(KID_1))
+            clock.advance(Duration.ofSeconds(5))
+
+            assertNotNull(locator.locate(mockJwsHeader(KID_1)))
             wireMock.verify(1, WireMock.getRequestedFor(WireMock.urlEqualTo(JWKS_PATH)))
         }
     }
