@@ -333,7 +333,7 @@ A token carries two independent lists of authority, and the library reads each i
 val authData = authenticator.authenticate(token)
 
 val isOrganizationAdmin = "ADMIN@organization:$organizationId" in authData.roles
-val mayCreateBits = authData.scope.isEmpty() || "bit:create" in authData.scope
+val mayCreateDocuments = authData.scope.isEmpty() || "document:create" in authData.scope
 ```
 
 Effective authority is the intersection: an application never exceeds the subject it acts for, and
