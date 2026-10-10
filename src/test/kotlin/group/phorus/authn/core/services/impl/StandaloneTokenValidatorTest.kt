@@ -621,10 +621,10 @@ class StandaloneTokenValidatorTest {
         fun `scope claim holding a JSON array is read into scope`() {
             val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
 
-            val token = signedTokenWith(mapOf("scope" to listOf("bit:read", "bit:create")))
+            val token = signedTokenWith(mapOf("scope" to listOf("document:read", "document:create")))
 
             val authData = authenticator.authenticate(token, enableValidators = false)
-            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+            assertEquals(listOf("document:read", "document:create"), authData.scope)
         }
 
         @Test
@@ -650,23 +650,23 @@ class StandaloneTokenValidatorTest {
             val authenticator = StandaloneTokenValidator(config, emptyList())
 
             val token = signedTokenWith(mapOf(
-                "scp" to "bit:read bit:create",
+                "scp" to "document:read document:create",
                 "entitlements" to listOf("ADMIN", "VIEWER"),
             ))
 
             val authData = authenticator.authenticate(token, enableValidators = false)
             assertEquals(listOf("ADMIN", "VIEWER"), authData.roles)
-            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+            assertEquals(listOf("document:read", "document:create"), authData.scope)
         }
 
         @Test
         fun `blank entries in a space-delimited claim are dropped`() {
             val authenticator = StandaloneTokenValidator(buildConfig(TokenFormat.JWS), emptyList())
 
-            val token = signedTokenWith(mapOf("scope" to "  bit:read   bit:create "))
+            val token = signedTokenWith(mapOf("scope" to "  document:read   document:create "))
 
             val authData = authenticator.authenticate(token, enableValidators = false)
-            assertEquals(listOf("bit:read", "bit:create"), authData.scope)
+            assertEquals(listOf("document:read", "document:create"), authData.scope)
         }
 
         @Test
@@ -771,13 +771,13 @@ class StandaloneTokenValidatorTest {
         fun `the scope argument wins over a scope entry in properties`(): Unit = runBlocking {
             val accessToken = factory.createAccessToken(
                 TEST_USER_ID,
-                listOf("bit:read"),
+                listOf("document:read"),
                 mapOf("scope" to "admin:everything"),
             )
 
             val authData = authenticator.authenticate(accessToken.token, enableValidators = false)
-            assertEquals(listOf("bit:read"), authData.scope)
-            assertEquals(listOf("bit:read"), accessToken.scope)
+            assertEquals(listOf("document:read"), authData.scope)
+            assertEquals(listOf("document:read"), accessToken.scope)
         }
 
         @Test
