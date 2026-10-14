@@ -7,7 +7,7 @@
 Core authentication library for Phorus services. Framework-agnostic JWT token creation,
 token validation, Identity Provider integration, context objects, DTOs, and service interfaces.
 
-For Spring Boot auto-configuration (filters, YAML config, API keys, privilege gates), see
+For Spring Boot auto-configuration (filters, YAML config, API keys, path rules), see
 [authn-spring-boot-starter](https://github.com/phorus-group/authn-spring-boot-starter).
 
 ### Notes
