@@ -4,7 +4,7 @@ import java.util.*
 
 /**
  * Data available after successful token authentication. Accessible via
- * [group.phorus.authn.core.context.AuthContext].
+ * [group.phorus.authn.core.context.AuthenticationContext].
  *
  * @property roles Subject entitlement, from the `roles` claim registered by
  *     [RFC 9068 SS7.2](https://datatracker.ietf.org/doc/html/rfc9068#section-7.2).
@@ -15,7 +15,7 @@ import java.util.*
  *     `exp` as a `Long` of seconds since the epoch per
  *     [RFC 7519 SS2](https://datatracker.ietf.org/doc/html/rfc7519#section-2).
  */
-data class AuthContextData(
+data class AuthenticationContextData(
     var userId: UUID,
     var roles: List<String> = emptyList(),
     var scope: List<String> = emptyList(),

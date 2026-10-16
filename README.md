@@ -39,7 +39,7 @@ For Spring Boot auto-configuration (filters, YAML config, API keys, path rules),
   - [IdpTokenValidator](#idptokenvalidator)
   - [JwksKeyLocator](#jwkskeylocator)
 - [Context objects](#context-objects)
-  - [AuthContext](#authcontext)
+  - [AuthenticationContext](#authcontext)
   - [HTTPContext](#httpcontext)
   - [ApiKeyContext](#apikeycontext)
 - [DTOs](#dtos)
@@ -470,14 +470,14 @@ which auto-configures these as Spring beans and handles the coroutine wrapping.
 Thread-local holders for request-scoped data. Set them during request processing, read them
 from anywhere in the call stack within the same thread.
 
-### AuthContext
+### AuthenticationContext
 
 ```kotlin
 // Store
-AuthContext.context.set(AuthContextData(userId = user.id, roles = user.roles))
+AuthenticationContext.context.set(AuthenticationContextData(userId = user.id, roles = user.roles))
 
 // Read
-val auth: AuthContextData? = AuthContext.context.get()
+val auth: AuthenticationContextData? = AuthenticationContext.context.get()
 ```
 
 ### HTTPContext
@@ -506,7 +506,7 @@ val metadata: Map<String, String> = apiKey?.metadata ?: emptyMap()
 
 | Type | Description |
 |------|-------------|
-| `AuthContextData` | User ID, roles, scope, and every claim of a validated token |
+| `AuthenticationContextData` | User ID, roles, scope, and every claim of a validated token |
 | `AuthData` | Raw token data after parsing: user ID, token type, JTI, roles, scope, claims |
 | `TokenType` | `ACCESS_TOKEN` or `REFRESH_TOKEN`, each with the `typ` header media type it is written as |
 | `AccessToken` | Issued token: compact JWT string, roles, and scope |
